@@ -4,68 +4,57 @@ import {
   getDocs, 
   doc, 
   updateDoc, 
-  deleteDoc,
+  deleteDoc, 
   query, 
   orderBy 
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from './config';
-import { ContactSubmission, Project, SubmissionStatus } from '../types';
+import { ContactSubmission, Project } from '../types';
 import { initialProjects } from '../data/initialData';
 
-const LOCAL_SUBMISSIONS_KEY = 'tanovax_contact_submissions';
-const LOCAL_PROJECTS_KEY = 'tanovax_custom_projects';
+// LocalStorage Keys
+const SUBMISSIONS_KEY = 'tanovax_contact_submissions';
+const PROJECTS_KEY = 'tanovax_custom_projects';
 
-// Helper for local storage submissions
+// Helper for Local Storage Submissions
 const getLocalSubmissions = (): ContactSubmission[] => {
   try {
-    const data = localStorage.getItem(LOCAL_SUBMISSIONS_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch {
+    const raw = localStorage.getItem(SUBMISSIONS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    console.error('Error reading local submissions', e);
     return [];
   }
 };
 
-const saveLocalSubmissions = (items: ContactSubmission[]) => {
+const saveLocalSubmissions = (subs: ContactSubmission[]) => {
   try {
-    localStorage.setItem(LOCAL_SUBMISSIONS_KEY, JSON.stringify(items));
-  } catch (err) {
-    console.error('Failed to save to localStorage:', err);
+    localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(subs));
+  } catch (e) {
+    console.error('Error saving local submissions', e);
   }
 };
 
-// Helper for local storage projects
+// Helper for Local Storage Projects
 const getLocalProjects = (): Project[] => {
   try {
-    const custom = localStorage.getItem(LOCAL_PROJECTS_KEY);
-    const parsedCustom: Project[] = custom ? JSON.parse(custom) : [];
-    // Combine initial projects with any custom created ones
-    const combined = [...initialProjects];
-    parsedCustom.forEach(c => {
-      const idx = combined.findIndex(p => p.id === c.id);
-      if (idx >= 0) {
-        combined[idx] = c;
-      } else {
-        combined.unshift(c);
-      }
-    });
-    return combined;
-  } catch {
+    const raw = localStorage.getItem(PROJECTS_KEY);
+    return raw ? JSON.parse(raw) : initialProjects;
+  } catch (e) {
     return initialProjects;
   }
 };
 
 const saveLocalProjects = (projects: Project[]) => {
   try {
-    // Only store modified or non-initial projects in localStorage
-    localStorage.setItem(LOCAL_PROJECTS_KEY, JSON.stringify(projects));
-  } catch (err) {
-    console.error('Failed to save projects to localStorage:', err);
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+  } catch (e) {
+    console.error('Error saving local projects', e);
   }
 };
 
-// ==========================================
-// CONTACT SUBMISSIONS
-// ==========================================
+// --- CONTACT SUBMISSION SERVICES ---
+
 export const submitContactForm = async (data: Omit<ContactSubmission, 'id' | 'createdAt' | 'status'>): Promise<{ success: boolean; id: string }> => {
   const newSubmission: ContactSubmission = {
     ...data,
@@ -73,6 +62,11 @@ export const submitContactForm = async (data: Omit<ContactSubmission, 'id' | 'cr
     createdAt: new Date().toISOString(),
     status: 'New'
   };
+
+  // Always save locally first for instant resilience
+  const currentLocal = getLocalSubmissions();
+  currentLocal.unshift(newSubmission);
+  saveLocalSubmissions(currentLocal);
 
   if (isFirebaseConfigured) {
     try {
@@ -89,26 +83,24 @@ export const submitContactForm = async (data: Omit<ContactSubmission, 'id' | 'cr
       });
       return { success: true, id: docRef.id };
     } catch (err) {
-      console.warn('Firebase write failed, using local storage fallback:', err);
+      console.warn('Firebase write failed (falling back to local storage):', err);
     }
   }
 
-  // Fallback storage
-  const current = getLocalSubmissions();
-  current.unshift(newSubmission);
-  saveLocalSubmissions(current);
   return { success: true, id: newSubmission.id };
 };
 
 export const getContactSubmissions = async (): Promise<ContactSubmission[]> => {
+  const localList = getLocalSubmissions();
+  
   if (isFirebaseConfigured) {
     try {
       const q = query(collection(db, 'contact_submissions'), orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
-      const docs: ContactSubmission[] = [];
+      const cloudDocs: ContactSubmission[] = [];
       snapshot.forEach(docSnap => {
         const d = docSnap.data();
-        docs.push({
+        cloudDocs.push({
           id: docSnap.id,
           name: d.name || '',
           companyName: d.companyName || '',
@@ -121,136 +113,135 @@ export const getContactSubmissions = async (): Promise<ContactSubmission[]> => {
           status: d.status || 'New'
         });
       });
-      return docs;
+
+      // Merge cloud and local uniquely by ID/email+timestamp
+      const combined = [...cloudDocs];
+      localList.forEach(loc => {
+        if (!combined.some(c => c.id === loc.id || (c.email === loc.email && c.createdAt === loc.createdAt))) {
+          combined.push(loc);
+        }
+      });
+      return combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     } catch (err) {
-      console.warn('Firebase query failed, reading local submissions:', err);
+      console.warn('Firebase read failed, using local storage fallback:', err);
     }
   }
 
-  return getLocalSubmissions();
+  return localList;
 };
 
-export const updateSubmissionStatus = async (id: string, status: SubmissionStatus): Promise<boolean> => {
+export const updateSubmissionStatus = async (id: string, status: ContactSubmission['status']): Promise<boolean> => {
+  // Update local storage
+  const current = getLocalSubmissions();
+  const updated = current.map(item => item.id === id ? { ...item, status } : item);
+  saveLocalSubmissions(updated);
+
   if (isFirebaseConfigured && !id.startsWith('sub_')) {
     try {
       const docRef = doc(db, 'contact_submissions', id);
       await updateDoc(docRef, { status });
-      return true;
     } catch (err) {
-      console.warn('Firebase update failed, falling back to local storage update:', err);
+      console.warn('Firebase update status failed:', err);
     }
   }
 
-  const list = getLocalSubmissions();
-  const index = list.findIndex(item => item.id === id);
-  if (index >= 0) {
-    list[index].status = status;
-    saveLocalSubmissions(list);
-    return true;
-  }
-  return false;
+  return true;
 };
 
-// ==========================================
-// PROJECTS API
-// ==========================================
-export const fetchProjects = async (): Promise<Project[]> => {
+// --- PROJECT MANAGEMENT SERVICES ---
+
+export const getProjects = async (): Promise<Project[]> => {
   if (isFirebaseConfigured) {
     try {
-      const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
+      const q = query(collection(db, 'projects'), orderBy('title', 'asc'));
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
-        const firestoreProjects: Project[] = [];
+        const docs: Project[] = [];
         snapshot.forEach(docSnap => {
           const d = docSnap.data();
-          firestoreProjects.push({
+          docs.push({
             id: docSnap.id,
-            title: d.title,
-            slug: d.slug,
-            category: d.category,
-            description: d.description,
-            overview: d.overview,
-            businessProblem: d.businessProblem,
-            solution: d.solution,
+            slug: d.slug || docSnap.id,
+            title: d.title || '',
+            subtitle: d.subtitle || '',
+            category: d.category || 'Website',
+            badgeText: d.badgeText || 'Demo Project',
+            isDemo: d.isDemo !== undefined ? d.isDemo : true,
+            summary: d.summary || '',
+            description: d.description || '',
+            clientType: d.clientType || '',
+            problem: d.problem || '',
+            solution: d.solution || '',
             features: d.features || [],
-            technologies: d.technologies || [],
-            images: d.images || [],
-            projectStatus: d.projectStatus || 'Demo Project',
-            published: d.published !== undefined ? d.published : true,
-            createdAt: d.createdAt || new Date().toISOString(),
-            objective: d.objective || ''
+            techStack: d.techStack || [],
+            outcomes: d.outcomes || [],
+            imageUrl: d.imageUrl || '',
+            demoUrl: d.demoUrl || ''
           });
         });
-        return firestoreProjects;
+        return docs;
       }
     } catch (err) {
-      console.warn('Firebase fetch projects failed, returning local set:', err);
+      console.warn('Firebase read projects failed, falling back to local/default:', err);
     }
   }
 
   return getLocalProjects();
 };
 
-export const fetchProjectBySlug = async (slug: string): Promise<Project | null> => {
-  const projects = await fetchProjects();
-  return projects.find(p => p.slug === slug) || null;
-};
-
-export const saveProjectRecord = async (projectData: Partial<Project>): Promise<Project> => {
-  const slug = projectData.slug || (projectData.title ? projectData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'project-' + Date.now());
-  
-  const fullProject: Project = {
-    id: projectData.id || 'proj_' + Date.now(),
-    title: projectData.title || 'Untitled Project',
-    slug,
-    category: projectData.category || 'Business Application',
-    description: projectData.description || '',
-    overview: projectData.overview || '',
-    businessProblem: projectData.businessProblem || '',
-    solution: projectData.solution || '',
-    features: projectData.features || [],
-    technologies: projectData.technologies || [],
-    images: projectData.images && projectData.images.length > 0 ? projectData.images : ['https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1200&q=80'],
-    projectStatus: projectData.projectStatus || 'Concept Project',
-    published: projectData.published !== undefined ? projectData.published : true,
-    createdAt: projectData.createdAt || new Date().toISOString().split('T')[0],
-    objective: projectData.objective || 'Provide digital transformation solution.'
+export const createProject = async (projectData: Omit<Project, 'id'>): Promise<{ success: boolean; project: Project }> => {
+  const tempId = 'proj_' + Date.now();
+  const newProject: Project = {
+    ...projectData,
+    id: tempId
   };
 
-  if (isFirebaseConfigured && !fullProject.id.startsWith('proj_')) {
+  const currentLocal = getLocalProjects();
+  currentLocal.unshift(newProject);
+  saveLocalProjects(currentLocal);
+
+  if (isFirebaseConfigured) {
     try {
-      const docRef = doc(db, 'projects', fullProject.id);
-      await updateDoc(docRef, { ...fullProject });
-      return fullProject;
+      const docRef = await addDoc(collection(db, 'projects'), projectData);
+      newProject.id = docRef.id;
     } catch (err) {
-      console.warn('Firebase save project failed:', err);
+      console.warn('Firebase create project failed:', err);
     }
   }
 
-  // Local storage save
-  const current = getLocalProjects();
-  const idx = current.findIndex(p => p.id === fullProject.id || p.slug === fullProject.slug);
-  if (idx >= 0) {
-    current[idx] = fullProject;
-  } else {
-    current.unshift(fullProject);
-  }
-  saveLocalProjects(current);
-  return fullProject;
+  return { success: true, project: newProject };
 };
 
-export const deleteProjectRecord = async (id: string): Promise<boolean> => {
+export const updateProject = async (id: string, projectData: Partial<Project>): Promise<boolean> => {
+  const currentLocal = getLocalProjects();
+  const updated = currentLocal.map(p => p.id === id ? { ...p, ...projectData } : p);
+  saveLocalProjects(updated);
+
   if (isFirebaseConfigured && !id.startsWith('proj_')) {
     try {
-      await deleteDoc(doc(db, 'projects', id));
-      return true;
+      const docRef = doc(db, 'projects', id);
+      await updateDoc(docRef, projectData);
+    } catch (err) {
+      console.warn('Firebase update project failed:', err);
+    }
+  }
+
+  return true;
+};
+
+export const deleteProject = async (id: string): Promise<boolean> => {
+  const currentLocal = getLocalProjects();
+  const filtered = currentLocal.filter(p => p.id !== id);
+  saveLocalProjects(filtered);
+
+  if (isFirebaseConfigured && !id.startsWith('proj_')) {
+    try {
+      const docRef = doc(db, 'projects', id);
+      await deleteDoc(docRef);
     } catch (err) {
       console.warn('Firebase delete project failed:', err);
     }
   }
 
-  const current = getLocalProjects();
-  const updated = current.filter(p => p.id !== id);
-  saveLocalProjects(updated);
   return true;
 };
