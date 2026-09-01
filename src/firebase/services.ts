@@ -131,7 +131,6 @@ export const getContactSubmissions = async (): Promise<ContactSubmission[]> => {
 };
 
 export const updateSubmissionStatus = async (id: string, status: ContactSubmission['status']): Promise<boolean> => {
-  // Update local storage
   const current = getLocalSubmissions();
   const updated = current.map(item => item.id === id ? { ...item, status } : item);
   saveLocalSubmissions(updated);
@@ -150,10 +149,10 @@ export const updateSubmissionStatus = async (id: string, status: ContactSubmissi
 
 // --- PROJECT MANAGEMENT SERVICES ---
 
-export const getProjects = async (): Promise<Project[]> => {
+export const fetchProjects = async (): Promise<Project[]> => {
   if (isFirebaseConfigured) {
     try {
-      const q = query(collection(db, 'projects'), orderBy('title', 'asc'));
+      const q = query(collection(db, 'projects'), orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
         const docs: Project[] = [];
@@ -163,20 +162,18 @@ export const getProjects = async (): Promise<Project[]> => {
             id: docSnap.id,
             slug: d.slug || docSnap.id,
             title: d.title || '',
-            subtitle: d.subtitle || '',
             category: d.category || 'Website',
-            badgeText: d.badgeText || 'Demo Project',
-            isDemo: d.isDemo !== undefined ? d.isDemo : true,
-            summary: d.summary || '',
+            projectStatus: d.projectStatus || 'Demo Project',
             description: d.description || '',
-            clientType: d.clientType || '',
-            problem: d.problem || '',
+            overview: d.overview || '',
+            businessProblem: d.businessProblem || '',
             solution: d.solution || '',
             features: d.features || [],
-            techStack: d.techStack || [],
-            outcomes: d.outcomes || [],
-            imageUrl: d.imageUrl || '',
-            demoUrl: d.demoUrl || ''
+            technologies: d.technologies || [],
+            images: d.images || [],
+            published: d.published !== undefined ? d.published : true,
+            createdAt: d.createdAt || new Date().toISOString(),
+            objective: d.objective || ''
           });
         });
         return docs;
@@ -189,47 +186,58 @@ export const getProjects = async (): Promise<Project[]> => {
   return getLocalProjects();
 };
 
-export const createProject = async (projectData: Omit<Project, 'id'>): Promise<{ success: boolean; project: Project }> => {
-  const tempId = 'proj_' + Date.now();
-  const newProject: Project = {
-    ...projectData,
-    id: tempId
+export const fetchProjectBySlug = async (slug: string): Promise<Project | null> => {
+  const all = await fetchProjects();
+  return all.find(p => p.slug === slug) || null;
+};
+
+export const saveProjectRecord = async (projectData: Partial<Project>): Promise<Project> => {
+  const id = projectData.id || 'proj_' + Date.now();
+  const fullProject: Project = {
+    id,
+    title: projectData.title || 'Untitled Project',
+    slug: projectData.slug || ('proj-' + Date.now()),
+    category: projectData.category || 'Website',
+    description: projectData.description || '',
+    overview: projectData.overview || '',
+    businessProblem: projectData.businessProblem || '',
+    solution: projectData.solution || '',
+    features: projectData.features || [],
+    technologies: projectData.technologies || [],
+    images: projectData.images || [],
+    projectStatus: projectData.projectStatus || 'Demo Project',
+    published: projectData.published !== undefined ? projectData.published : true,
+    createdAt: projectData.createdAt || new Date().toISOString(),
+    objective: projectData.objective || ''
   };
 
   const currentLocal = getLocalProjects();
-  currentLocal.unshift(newProject);
+  const existingIdx = currentLocal.findIndex(p => p.id === id);
+  if (existingIdx >= 0) {
+    currentLocal[existingIdx] = fullProject;
+  } else {
+    currentLocal.unshift(fullProject);
+  }
   saveLocalProjects(currentLocal);
 
   if (isFirebaseConfigured) {
     try {
-      const docRef = await addDoc(collection(db, 'projects'), projectData);
-      newProject.id = docRef.id;
+      if (projectData.id && !projectData.id.startsWith('proj_')) {
+        const docRef = doc(db, 'projects', projectData.id);
+        await updateDoc(docRef, projectData);
+      } else {
+        const docRef = await addDoc(collection(db, 'projects'), projectData);
+        fullProject.id = docRef.id;
+      }
     } catch (err) {
-      console.warn('Firebase create project failed:', err);
+      console.warn('Firebase save project failed:', err);
     }
   }
 
-  return { success: true, project: newProject };
+  return fullProject;
 };
 
-export const updateProject = async (id: string, projectData: Partial<Project>): Promise<boolean> => {
-  const currentLocal = getLocalProjects();
-  const updated = currentLocal.map(p => p.id === id ? { ...p, ...projectData } : p);
-  saveLocalProjects(updated);
-
-  if (isFirebaseConfigured && !id.startsWith('proj_')) {
-    try {
-      const docRef = doc(db, 'projects', id);
-      await updateDoc(docRef, projectData);
-    } catch (err) {
-      console.warn('Firebase update project failed:', err);
-    }
-  }
-
-  return true;
-};
-
-export const deleteProject = async (id: string): Promise<boolean> => {
+export const deleteProjectRecord = async (id: string): Promise<boolean> => {
   const currentLocal = getLocalProjects();
   const filtered = currentLocal.filter(p => p.id !== id);
   saveLocalProjects(filtered);
