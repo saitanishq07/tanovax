@@ -5,7 +5,7 @@ export const siteConfig = {
   heroSubtext: 'TanovaX designs and develops modern websites and custom business applications that help businesses operate, grow and connect with their customers.',
   whatsappNumber: import.meta.env.VITE_WHATSAPP_NUMBER || '+916300699087',
   phone: import.meta.env.VITE_PHONE || '+916300699087',
-  email: import.meta.env.VITE_EMAIL || 'hello@tanovax.com',
+  email: import.meta.env.VITE_EMAIL || 'tanishq@tanovax.com',
   websiteUrl: import.meta.env.VITE_WEBSITE_URL || 'https://tanovax.com',
   location: 'India & Global Remote Solutions',
   social: {
