@@ -1,5 +1,5 @@
 import React from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { HomePage } from './pages/HomePage';
 import { AboutPage } from './pages/AboutPage';
 import { ServicesPage } from './pages/ServicesPage';
@@ -13,7 +13,7 @@ import { AdminDashboardPage } from './admin/AdminDashboardPage';
 
 export const App: React.FC = () => {
   return (
-    <HashRouter>
+    <BrowserRouter>
       <Routes>
         {/* Public Brand Pages */}
         <Route path="/" element={<HomePage />} />
@@ -32,7 +32,7 @@ export const App: React.FC = () => {
         {/* Fallback 404 Route */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-    </HashRouter>
+    </BrowserRouter>
   );
 };
 
