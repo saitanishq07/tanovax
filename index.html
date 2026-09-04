@@ -39,6 +39,38 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Schema.org JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://tanovax.com/#organization",
+          "name": "TanovaX",
+          "url": "https://tanovax.com/",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://tanovax.com/logo.png"
+          },
+          "description": "TanovaX designs and develops modern websites and custom business applications for businesses, startups, and growing enterprises.",
+          "email": "tanishq@tanovax.com",
+          "telephone": "+916300699087"
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://tanovax.com/#website",
+          "url": "https://tanovax.com/",
+          "name": "TanovaX",
+          "description": "TanovaX | Web, Apps & Business Solutions",
+          "publisher": {
+            "@id": "https://tanovax.com/#organization"
+          }
+        }
+      ]
+    }
+    </script>
   </head>
   <body class="bg-dark-bg text-slate-100 font-sans antialiased selection:bg-brand-500 selection:text-white min-h-screen flex flex-col">
     <div id="root"></div>
