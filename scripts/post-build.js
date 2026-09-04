@@ -93,6 +93,10 @@ Object.keys(routesMetadata).forEach((route) => {
   }
 });
 
-// Also create dist/404.html as a fallback
+// Create dist/404.html fallback
 fs.writeFileSync(path.join(distDir, '404.html'), indexContent, 'utf8');
 console.log('✓ Generated static fallback: dist/404.html');
+
+// Create dist/.nojekyll to bypass Jekyll processing on GitHub Pages
+fs.writeFileSync(path.join(distDir, '.nojekyll'), '# Disable Jekyll', 'utf8');
+console.log('✓ Generated dist/.nojekyll');
