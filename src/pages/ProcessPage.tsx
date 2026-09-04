@@ -21,7 +21,7 @@ export const ProcessPage: React.FC = () => {
 
   return (
     <Layout
-      title="Our Engineering Process"
+      title="Our Process | Digital Solutions for Businesses | TanovaX"
       description="Learn about TanovaX's 6-step structured software development process: Understand, Plan, Design, Develop, Test, and Launch."
     >
       {/* Header */}

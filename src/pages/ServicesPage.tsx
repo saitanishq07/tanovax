@@ -23,7 +23,7 @@ export const ServicesPage: React.FC = () => {
 
   return (
     <Layout
-      title="Services & Capabilities"
+      title="Web, Apps & Business Solutions | TanovaX"
       description="Explore TanovaX web development and custom business application services. Business websites, CRMs, billing, inventory, dashboards, and client portals."
     >
       {/* Page Header */}

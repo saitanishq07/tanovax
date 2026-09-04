@@ -34,7 +34,7 @@ export const WorkPage: React.FC = () => {
 
   return (
     <Layout
-      title="Work & Portfolio"
+      title="Our Work | Websites & Business Applications | TanovaX"
       description="Explore TanovaX showcase & concept projects. Demonstrating custom business CRMs, billing systems, inventory portals, and modern websites."
     >
       {/* Header */}

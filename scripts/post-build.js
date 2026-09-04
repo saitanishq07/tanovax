@@ -15,35 +15,35 @@ if (!fs.existsSync(indexHtmlPath)) {
 
 const indexContent = fs.readFileSync(indexHtmlPath, 'utf8');
 
-// Metadata dictionary for each public route
+// Metadata dictionary for each public route with optimized SEO titles
 const routesMetadata = {
   '': {
-    title: 'TanovaX | Web • Applications • Business Solutions',
+    title: 'TanovaX | Web, Apps & Business Solutions',
     description: 'TanovaX designs and develops modern websites and custom business applications for businesses, startups, and growing enterprises. High performance CRM, billing, inventory, and web solutions.',
     canonical: 'https://tanovax.com/'
   },
   'about': {
-    title: 'About Us | TanovaX',
+    title: 'About TanovaX | Web & Custom Business Solutions',
     description: 'Learn about TanovaX — a digital solutions brand focused on building modern websites and custom business applications for companies and growing startups.',
     canonical: 'https://tanovax.com/about'
   },
   'services': {
-    title: 'Our Services | TanovaX',
+    title: 'Web, Apps & Business Solutions | TanovaX',
     description: 'Explore custom software development services by TanovaX: Business websites, CRMs, billing systems, inventory portals, employee management tools, and executive dashboards.',
     canonical: 'https://tanovax.com/services'
   },
   'work': {
-    title: 'Our Work & Case Studies | TanovaX',
+    title: 'Our Work | Websites & Business Applications | TanovaX',
     description: 'Browse real-world concepts and custom software applications built by TanovaX for businesses, healthcare providers, real estate firms, and hospitality brands.',
     canonical: 'https://tanovax.com/work'
   },
   'process': {
-    title: 'Our 6-Phase Process | TanovaX',
+    title: 'Our Process | Digital Solutions for Businesses | TanovaX',
     description: 'Discover TanovaX\'s structured 6-phase software engineering process — from discovery and architecture to development, QA, deployment, and ongoing support.',
     canonical: 'https://tanovax.com/process'
   },
   'contact': {
-    title: 'Contact Us | TanovaX',
+    title: 'Contact TanovaX | Web & Business Solutions',
     description: 'Get in touch with TanovaX for custom website and business application development inquiries. Schedule a consultation or request a project estimate.',
     canonical: 'https://tanovax.com/contact'
   }

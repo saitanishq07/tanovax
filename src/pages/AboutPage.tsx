@@ -7,7 +7,7 @@ import { ArrowRight, CheckCircle2, Workflow, Eye, UserCheck, ShieldCheck, Code, 
 export const AboutPage: React.FC = () => {
   return (
     <Layout
-      title="About Us"
+      title="About TanovaX | Web & Custom Business Solutions"
       description="Learn about TanovaX — a digital solutions brand focused on building modern websites and custom business applications for companies and growing startups."
     >
       {/* Hero */}

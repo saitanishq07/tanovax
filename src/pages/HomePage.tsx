@@ -18,7 +18,7 @@ export const HomePage: React.FC = () => {
 
   return (
     <Layout
-      title="Digital Solutions Built Around Your Business"
+      title="TanovaX | Web, Apps & Business Solutions"
       description="TanovaX designs and develops modern websites and custom business applications that help businesses operate, grow and connect with their customers."
     >
       {/* ================================================= */}

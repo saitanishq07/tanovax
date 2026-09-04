@@ -14,7 +14,9 @@ export const MetaSEO: React.FC<MetaSEOProps> = ({
   keywords,
   canonicalPath
 }) => {
-  const fullTitle = title ? `${title} | ${siteConfig.companyName}` : `${siteConfig.companyName} | ${siteConfig.tagline}`;
+  const fullTitle = title 
+    ? (title.includes('TanovaX') ? title : `${title} | ${siteConfig.companyName}`) 
+    : `${siteConfig.companyName} | ${siteConfig.tagline}`;
   const currentPath = canonicalPath !== undefined ? canonicalPath : (typeof window !== 'undefined' ? window.location.pathname : '');
   const fullUrl = `${siteConfig.websiteUrl}${currentPath === '/' ? '' : currentPath}`;
 

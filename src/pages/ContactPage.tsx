@@ -8,7 +8,7 @@ import { siteConfig } from '../config/siteConfig';
 export const ContactPage: React.FC = () => {
   return (
     <Layout
-      title="Contact Us | Start a Project"
+      title="Contact TanovaX | Web & Business Solutions"
       description="Have a project in mind? Tell us what you want to build. Contact TanovaX via form, email, phone, or WhatsApp."
     >
       {/* Page Header */}
