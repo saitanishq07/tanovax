@@ -15,37 +15,55 @@ if (!fs.existsSync(indexHtmlPath)) {
 
 const indexContent = fs.readFileSync(indexHtmlPath, 'utf8');
 
-// Metadata dictionary for each public route with optimized SEO titles
+// Metadata dictionary for each public route and admin routes
 const routesMetadata = {
   '': {
     title: 'TanovaX | Web, Apps & Business Solutions',
     description: 'TanovaX designs and develops modern websites and custom business applications for businesses, startups, and growing enterprises. High performance CRM, billing, inventory, and web solutions.',
-    canonical: 'https://tanovax.com/'
+    canonical: 'https://tanovax.com/',
+    noindex: false
   },
   'about': {
     title: 'About TanovaX | Web & Custom Business Solutions',
     description: 'Learn about TanovaX — a digital solutions brand focused on building modern websites and custom business applications for companies and growing startups.',
-    canonical: 'https://tanovax.com/about'
+    canonical: 'https://tanovax.com/about',
+    noindex: false
   },
   'services': {
     title: 'Web, Apps & Business Solutions | TanovaX',
     description: 'Explore custom software development services by TanovaX: Business websites, CRMs, billing systems, inventory portals, employee management tools, and executive dashboards.',
-    canonical: 'https://tanovax.com/services'
+    canonical: 'https://tanovax.com/services',
+    noindex: false
   },
   'work': {
     title: 'Our Work | Websites & Business Applications | TanovaX',
     description: 'Browse real-world concepts and custom software applications built by TanovaX for businesses, healthcare providers, real estate firms, and hospitality brands.',
-    canonical: 'https://tanovax.com/work'
+    canonical: 'https://tanovax.com/work',
+    noindex: false
   },
   'process': {
     title: 'Our Process | Digital Solutions for Businesses | TanovaX',
     description: 'Discover TanovaX\'s structured 6-phase software engineering process — from discovery and architecture to development, QA, deployment, and ongoing support.',
-    canonical: 'https://tanovax.com/process'
+    canonical: 'https://tanovax.com/process',
+    noindex: false
   },
   'contact': {
     title: 'Contact TanovaX | Web & Business Solutions',
     description: 'Get in touch with TanovaX for custom website and business application development inquiries. Schedule a consultation or request a project estimate.',
-    canonical: 'https://tanovax.com/contact'
+    canonical: 'https://tanovax.com/contact',
+    noindex: false
+  },
+  'admin': {
+    title: 'Admin Portal | TanovaX',
+    description: 'TanovaX Admin Dashboard Portal',
+    canonical: 'https://tanovax.com/admin',
+    noindex: true
+  },
+  'admin/login': {
+    title: 'Admin Login | TanovaX',
+    description: 'TanovaX Admin Login Portal',
+    canonical: 'https://tanovax.com/admin/login',
+    noindex: true
   }
 };
 
@@ -71,10 +89,14 @@ function injectMetadata(html, meta) {
   updated = updated.replace(/<meta property="twitter:title" content=".*?" \/>/gi, `<meta property="twitter:title" content="${meta.title}" />`);
   updated = updated.replace(/<meta property="twitter:description" content=".*?" \/>/gi, `<meta property="twitter:description" content="${meta.description}" />`);
 
+  if (meta.noindex) {
+    updated = updated.replace('</head>', '  <meta name="robots" content="noindex, nofollow" />\n  </head>');
+  }
+
   return updated;
 }
 
-// Generate static pre-rendered HTML files for each public route
+// Generate static pre-rendered HTML files for each route
 Object.keys(routesMetadata).forEach((route) => {
   const meta = routesMetadata[route];
   const customHtml = injectMetadata(indexContent, meta);
@@ -85,7 +107,12 @@ Object.keys(routesMetadata).forEach((route) => {
     console.log(`✓ Injected pre-rendered static metadata into dist/index.html (${meta.canonical})`);
   } else {
     // Write both dist/route.html and dist/route/index.html for universal host compatibility
-    fs.writeFileSync(path.join(distDir, `${route}.html`), customHtml, 'utf8');
+    const htmlFilePath = path.join(distDir, `${route}.html`);
+    const htmlFileDir = path.dirname(htmlFilePath);
+    if (!fs.existsSync(htmlFileDir)) {
+      fs.mkdirSync(htmlFileDir, { recursive: true });
+    }
+    fs.writeFileSync(htmlFilePath, customHtml, 'utf8');
 
     const routeDir = path.join(distDir, route);
     if (!fs.existsSync(routeDir)) {
