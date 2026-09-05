@@ -2,23 +2,40 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { 
-  getContactSubmissions, 
-  updateSubmissionStatus, 
+  getLeads,
+  saveLeadRecord,
+  deleteLeadRecord,
+  addNoteToLead,
+  getQuotations,
+  saveQuotationRecord,
+  deleteQuotationRecord,
   fetchProjects, 
   saveProjectRecord, 
   deleteProjectRecord,
   fetchSiteSettings,
   saveSiteSettings,
-  DEFAULT_SITE_SETTINGS
+  DEFAULT_SITE_SETTINGS,
+  formatINR
 } from '../firebase/services';
-import { ContactSubmission, Project, SubmissionStatus, SiteSettings } from '../types';
+import { 
+  Lead, 
+  LeadStatus, 
+  LeadSource, 
+  Quotation, 
+  QuotationStatus, 
+  QuotationLineItem,
+  Project, 
+  SiteSettings 
+} from '../types';
 import { BrandLogo } from '../components/common/BrandLogo';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
+import { QuotationPreviewModal } from '../components/admin/QuotationPreviewModal';
 import { 
   LogOut, 
-  Inbox, 
+  Users, 
+  FileText, 
   FolderKanban, 
   Plus, 
   Trash2, 
@@ -30,26 +47,54 @@ import {
   Settings,
   MessageSquare,
   Save,
-  CheckCircle
+  CheckCircle,
+  LayoutDashboard,
+  Search,
+  ArrowUpRight,
+  Printer,
+  Copy,
+  TrendingUp,
+  Award
 } from 'lucide-react';
 
 export const AdminDashboardPage: React.FC = () => {
   const { isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<'submissions' | 'projects' | 'settings'>('submissions');
-  const [submissions, setSubmissions] = useState<ContactSubmission[]>([]);
+  // Active Tab
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'leads' | 'quotations' | 'projects' | 'settings'>('dashboard');
+
+  // Master Data
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
   const [loading, setLoading] = useState(true);
 
-  // Settings states
+  // Settings state
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSavedToast, setSettingsSavedToast] = useState(false);
 
-  // Filter & Search states
-  const [submissionFilter, setSubmissionFilter] = useState<string>('All');
-  const [selectedSubmission, setSelectedSubmission] = useState<ContactSubmission | null>(null);
+  // Dashboard Filters
+  const [dashboardTimeFilter, setDashboardTimeFilter] = useState<'today' | 'week' | 'month' | 'all'>('all');
+
+  // Lead Filters & Selected State
+  const [leadSearch, setLeadSearch] = useState('');
+  const [leadStatusFilter, setLeadStatusFilter] = useState<string>('All');
+  const [leadSourceFilter, setLeadSourceFilter] = useState<string>('All');
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+
+  // Lead Modal & Note States
+  const [leadModalOpen, setLeadModalOpen] = useState(false);
+  const [editingLead, setEditingLead] = useState<Partial<Lead> | null>(null);
+  const [newNoteText, setNewNoteText] = useState('');
+
+  // Quotation Filters & States
+  const [quotationSearch, setQuotationSearch] = useState('');
+  const [quotationStatusFilter, setQuotationStatusFilter] = useState<string>('All');
+  const [selectedQuotationForPreview, setSelectedQuotationForPreview] = useState<Quotation | null>(null);
+  const [quotationModalOpen, setQuotationModalOpen] = useState(false);
+  const [editingQuotation, setEditingQuotation] = useState<Partial<Quotation> | null>(null);
 
   // Project Modal State
   const [projectModalOpen, setProjectModalOpen] = useState(false);
@@ -65,29 +110,130 @@ export const AdminDashboardPage: React.FC = () => {
 
   const loadData = async () => {
     setLoading(true);
-    const subs = await getContactSubmissions();
-    const projs = await fetchProjects();
-    const settings = await fetchSiteSettings();
-    setSubmissions(subs);
-    setProjects(projs);
-    setSiteSettings(settings);
+    const [fetchedLeads, fetchedQuotations, fetchedProjects, fetchedSettings] = await Promise.all([
+      getLeads(),
+      getQuotations(),
+      fetchProjects(),
+      fetchSiteSettings()
+    ]);
+    setLeads(fetchedLeads);
+    setQuotations(fetchedQuotations);
+    setProjects(fetchedProjects);
+    setSiteSettings(fetchedSettings);
+
+    // Keep selected lead updated if active
+    if (selectedLead) {
+      const refreshed = fetchedLeads.find(l => l.id === selectedLead.id);
+      if (refreshed) setSelectedLead(refreshed);
+    }
     setLoading(false);
   };
 
-  const handleStatusChange = async (id: string, newStatus: SubmissionStatus) => {
-    await updateSubmissionStatus(id, newStatus);
-    setSubmissions(prev =>
-      prev.map(s => (s.id === id ? { ...s, status: newStatus } : s))
-    );
-    if (selectedSubmission && selectedSubmission.id === id) {
-      setSelectedSubmission(prev => (prev ? { ...prev, status: newStatus } : null));
+  // --- LEAD HANDLERS ---
+  const handleLeadStatusChange = async (leadId: string, newStatus: LeadStatus) => {
+    await saveLeadRecord({ id: leadId, status: newStatus });
+    loadData();
+  };
+
+  const handleSaveLead = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLead?.fullName) return;
+    await saveLeadRecord(editingLead as any);
+    setLeadModalOpen(false);
+    setEditingLead(null);
+    loadData();
+  };
+
+  const handleDeleteLead = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this lead record?')) {
+      await deleteLeadRecord(id);
+      if (selectedLead?.id === id) setSelectedLead(null);
+      loadData();
     }
   };
 
+  const handleAddNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedLead || !newNoteText.trim()) return;
+    await addNoteToLead(selectedLead.id, newNoteText);
+    setNewNoteText('');
+    loadData();
+  };
+
+  const handleCreateQuotationFromLead = (lead: Lead) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const validUntilDate = new Date();
+    validUntilDate.setDate(validUntilDate.getDate() + 15);
+
+    setEditingQuotation({
+      leadId: lead.id,
+      clientName: lead.fullName,
+      companyName: lead.companyName || '',
+      email: lead.email,
+      phone: lead.phone,
+      projectName: lead.serviceInterested || 'Web / Application Project',
+      projectDescription: lead.messageRequirement || '',
+      date: todayStr,
+      validUntil: validUntilDate.toISOString().split('T')[0],
+      deliveryTimeline: lead.projectTimeline || '2–4 Weeks',
+      paymentTerms: '50% advance upon project kickoff, 50% upon final delivery.',
+      termsAndConditions: '1. Quotation valid for 15 days.\n2. Includes 30 days post-launch technical support.',
+      status: 'Draft',
+      taxRate: 18,
+      lineItems: [
+        {
+          id: 'item_1',
+          description: `${lead.serviceInterested || 'Custom Software Development'} Service`,
+          quantity: 1,
+          unitPrice: 40000,
+          discount: 0,
+          taxRate: 18,
+          taxAmount: 7200,
+          total: 47200
+        }
+      ]
+    });
+    setQuotationModalOpen(true);
+  };
+
+  // --- QUOTATION HANDLERS ---
+  const handleSaveQuotation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingQuotation?.clientName || !editingQuotation.projectName) return;
+    await saveQuotationRecord(editingQuotation);
+    setQuotationModalOpen(false);
+    setEditingQuotation(null);
+    loadData();
+  };
+
+  const handleDeleteQuotation = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this quotation?')) {
+      await deleteQuotationRecord(id);
+      loadData();
+    }
+  };
+
+  const handleDuplicateQuotation = async (quo: Quotation) => {
+    const copy = {
+      ...quo,
+      id: undefined,
+      quotationNumber: undefined,
+      date: new Date().toISOString().split('T')[0],
+      status: 'Draft' as QuotationStatus
+    };
+    await saveQuotationRecord(copy);
+    loadData();
+  };
+
+  const handleQuotationStatusChange = async (quoId: string, status: QuotationStatus) => {
+    await saveQuotationRecord({ id: quoId, status });
+    loadData();
+  };
+
+  // --- PROJECT HANDLERS ---
   const handleSaveProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProject?.title) return;
-
     await saveProjectRecord(editingProject);
     setProjectModalOpen(false);
     setEditingProject(null);
@@ -102,13 +248,11 @@ export const AdminDashboardPage: React.FC = () => {
   };
 
   const handleTogglePublish = async (project: Project) => {
-    await saveProjectRecord({
-      ...project,
-      published: !project.published
-    });
+    await saveProjectRecord({ ...project, published: !project.published });
     loadData();
   };
 
+  // --- SITE SETTINGS HANDLERS ---
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingSettings(true);
@@ -118,22 +262,105 @@ export const AdminDashboardPage: React.FC = () => {
     setTimeout(() => setSettingsSavedToast(false), 4000);
   };
 
-  const filteredSubmissions = submissions.filter(s => {
-    if (submissionFilter === 'All') return true;
-    return s.status === submissionFilter;
+  // --- FILTERED LEADS COMPUTATION ---
+  const filteredLeads = leads.filter(l => {
+    const matchesSearch = 
+      l.fullName.toLowerCase().includes(leadSearch.toLowerCase()) ||
+      (l.companyName && l.companyName.toLowerCase().includes(leadSearch.toLowerCase())) ||
+      l.email.toLowerCase().includes(leadSearch.toLowerCase()) ||
+      l.phone.includes(leadSearch) ||
+      l.serviceInterested.toLowerCase().includes(leadSearch.toLowerCase());
+
+    const matchesStatus = leadStatusFilter === 'All' || l.status === leadStatusFilter;
+    const matchesSource = leadSourceFilter === 'All' || l.leadSource === leadSourceFilter;
+
+    return matchesSearch && matchesStatus && matchesSource;
   });
 
+  // --- FILTERED QUOTATIONS COMPUTATION ---
+  const filteredQuotations = quotations.filter(q => {
+    const matchesSearch = 
+      q.quotationNumber.toLowerCase().includes(quotationSearch.toLowerCase()) ||
+      q.clientName.toLowerCase().includes(quotationSearch.toLowerCase()) ||
+      (q.companyName && q.companyName.toLowerCase().includes(quotationSearch.toLowerCase())) ||
+      q.projectName.toLowerCase().includes(quotationSearch.toLowerCase());
+
+    const matchesStatus = quotationStatusFilter === 'All' || q.status === quotationStatusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  // --- DASHBOARD STATS COMPUTATION ---
+  const now = new Date();
+  const filterByTime = (dateStr: string) => {
+    if (dashboardTimeFilter === 'all') return true;
+    const d = new Date(dateStr);
+    if (dashboardTimeFilter === 'today') {
+      return d.toDateString() === now.toDateString();
+    }
+    if (dashboardTimeFilter === 'week') {
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(now.getDate() - 7);
+      return d >= oneWeekAgo;
+    }
+    if (dashboardTimeFilter === 'month') {
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    }
+    return true;
+  };
+
+  const timeFilteredLeads = leads.filter(l => filterByTime(l.createdAt));
+  const timeFilteredQuotations = quotations.filter(q => filterByTime(q.createdAt));
+
+  const totalLeads = timeFilteredLeads.length;
+  const newLeadsCount = timeFilteredLeads.filter(l => l.status === 'NEW').length;
+  const activeLeadsCount = timeFilteredLeads.filter(l => 
+    ['CONTACTED', 'REQUIREMENT RECEIVED', 'PROPOSAL SENT', 'NEGOTIATION'].includes(l.status)
+  ).length;
+  const wonLeadsCount = timeFilteredLeads.filter(l => l.status === 'WON').length;
+
+  const totalQuotationsCount = timeFilteredQuotations.length;
+  const pendingQuotations = timeFilteredQuotations.filter(q => ['Draft', 'Sent', 'Viewed'].includes(q.status));
+  const acceptedQuotations = timeFilteredQuotations.filter(q => q.status === 'Accepted');
+
+  const acceptedQuotationValue = acceptedQuotations.reduce((sum, q) => sum + (q.grandTotal || 0), 0);
+  const totalQuotationValue = timeFilteredQuotations.reduce((sum, q) => sum + (q.grandTotal || 0), 0);
+
+  // Pipeline counts breakdown
+  const pipelineCounts = {
+    NEW: timeFilteredLeads.filter(l => l.status === 'NEW').length,
+    CONTACTED: timeFilteredLeads.filter(l => l.status === 'CONTACTED').length,
+    'REQUIREMENT RECEIVED': timeFilteredLeads.filter(l => l.status === 'REQUIREMENT RECEIVED').length,
+    'PROPOSAL SENT': timeFilteredLeads.filter(l => l.status === 'PROPOSAL SENT').length,
+    NEGOTIATION: timeFilteredLeads.filter(l => l.status === 'NEGOTIATION').length,
+    WON: timeFilteredLeads.filter(l => l.status === 'WON').length,
+    LOST: timeFilteredLeads.filter(l => l.status === 'LOST').length
+  };
+
+  const getStatusBadgeVariant = (status: LeadStatus) => {
+    switch (status) {
+      case 'NEW': return 'brand';
+      case 'CONTACTED': return 'slate';
+      case 'REQUIREMENT RECEIVED': return 'slate';
+      case 'PROPOSAL SENT': return 'slate';
+      case 'NEGOTIATION': return 'slate';
+      case 'WON': return 'status';
+      case 'LOST': return 'slate';
+      default: return 'slate';
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-dark-bg text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-dark-bg text-slate-100 flex flex-col font-sans">
       {/* Top Admin Header */}
-      <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between">
+      <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between sticky top-0 z-30">
         <div className="flex items-center gap-3">
           <BrandLogo />
           <span className="px-2.5 py-0.5 rounded-md bg-brand-500/20 text-brand-400 border border-brand-500/30 text-xs font-semibold">
-            Admin Portal
+            Executive Admin Portal
           </span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <Button onClick={loadData} variant="ghost" size="sm" icon={<RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />}>
             Sync Data
           </Button>
@@ -154,34 +381,58 @@ export const AdminDashboardPage: React.FC = () => {
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-8">
         {/* Navigation Tabs */}
-        <div className="flex border-b border-slate-800 gap-6">
+        <div className="flex border-b border-slate-800 gap-2 sm:gap-6 overflow-x-auto scrollbar-none">
           <button
-            onClick={() => setActiveTab('submissions')}
-            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
-              activeTab === 'submissions'
+            onClick={() => setActiveTab('dashboard')}
+            className={`pb-3 px-2 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'dashboard'
                 ? 'border-brand-500 text-brand-400'
                 : 'border-transparent text-slate-400 hover:text-white'
             }`}
           >
-            <Inbox className="w-4 h-4" />
-            <span>Project Enquiries ({submissions.length})</span>
+            <LayoutDashboard className="w-4 h-4" />
+            <span>Executive Dashboard</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('leads')}
+            className={`pb-3 px-2 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'leads'
+                ? 'border-brand-500 text-brand-400'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Lead Management ({leads.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('quotations')}
+            className={`pb-3 px-2 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'quotations'
+                ? 'border-brand-500 text-brand-400'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Quotations & Proposals ({quotations.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('projects')}
-            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
+            className={`pb-3 px-2 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'projects'
                 ? 'border-brand-500 text-brand-400'
                 : 'border-transparent text-slate-400 hover:text-white'
             }`}
           >
             <FolderKanban className="w-4 h-4" />
-            <span>Manage Projects ({projects.length})</span>
+            <span>Projects ({projects.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('settings')}
-            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
+            className={`pb-3 px-2 text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'settings'
                 ? 'border-brand-500 text-brand-400'
                 : 'border-transparent text-slate-400 hover:text-white'
@@ -193,56 +444,301 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
 
         {/* ==================================================== */}
-        {/* TAB 1: SUBMISSIONS MANAGEMENT */}
+        {/* TAB 1: EXECUTIVE DASHBOARD */}
         {/* ==================================================== */}
-        {activeTab === 'submissions' && (
-          <div className="space-y-6">
-            {/* Filter Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-slate-400">Filter Status:</span>
-                <select
-                  value={submissionFilter}
-                  onChange={(e) => setSubmissionFilter(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-brand-500"
-                >
-                  <option value="All">All Statuses ({submissions.length})</option>
-                  <option value="New">New</option>
-                  <option value="Contacted">Contacted</option>
-                  <option value="In Discussion">In Discussion</option>
-                  <option value="Proposal Sent">Proposal Sent</option>
-                  <option value="Converted">Converted</option>
-                  <option value="Closed">Closed</option>
-                </select>
+        {activeTab === 'dashboard' && (
+          <div className="space-y-8">
+            {/* Header Toolbar & Time Filter */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-5 rounded-2xl border border-slate-800">
+              <div>
+                <h2 className="text-xl font-bold text-slate-100">TanovaX Business Overview</h2>
+                <p className="text-xs text-slate-400">Real-time statistics for leads, sales pipeline, and proposals</p>
               </div>
 
-              <div className="text-xs text-slate-400">
-                Showing <strong className="text-slate-200">{filteredSubmissions.length}</strong> enquiries
+              <div className="flex items-center gap-3">
+                <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                  {(['today', 'week', 'month', 'all'] as const).map(tf => (
+                    <button
+                      key={tf}
+                      onClick={() => setDashboardTimeFilter(tf)}
+                      className={`px-3 py-1.5 rounded-lg capitalize transition-colors ${
+                        dashboardTimeFilter === tf
+                          ? 'bg-brand-500/20 text-brand-400 font-bold border border-brand-500/30'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {tf === 'all' ? 'All Time' : tf === 'week' ? 'This Week' : tf === 'month' ? 'This Month' : 'Today'}
+                    </button>
+                  ))}
+                </div>
+
+                <Button
+                  onClick={() => {
+                    setEditingLead({
+                      fullName: '',
+                      companyName: '',
+                      email: '',
+                      phone: '',
+                      serviceInterested: 'Website Development',
+                      budgetRange: '₹25,000 – ₹50,000',
+                      projectTimeline: 'Within 1 Month',
+                      messageRequirement: '',
+                      leadSource: 'Website',
+                      status: 'NEW'
+                    });
+                    setLeadModalOpen(true);
+                  }}
+                  variant="primary"
+                  size="sm"
+                  icon={<Plus className="w-4 h-4" />}
+                >
+                  + New Lead
+                </Button>
               </div>
             </div>
 
-            {/* Submissions Table / Cards */}
-            {loading ? (
-              <div className="p-12 text-center text-slate-400 flex items-center justify-center gap-2">
-                <RefreshCw className="w-5 h-5 animate-spin text-brand-400" />
-                <span>Loading project enquiries...</span>
-              </div>
-            ) : filteredSubmissions.length === 0 ? (
-              <Card className="p-12 text-center border-dashed border-slate-800">
-                <Inbox className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <h3 className="text-lg font-bold text-slate-300">No project enquiries found</h3>
-                <p className="text-sm text-slate-500 mt-1">Enquiries submitted via "Start a Project" will appear here.</p>
+            {/* KPI Cards Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card className="p-5 border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase">
+                  <span>Total Enquiries</span>
+                  <Users className="w-4 h-4 text-brand-400" />
+                </div>
+                <div className="text-3xl font-extrabold text-slate-100">{totalLeads}</div>
+                <div className="text-xs text-slate-400 flex items-center justify-between pt-1 border-t border-slate-800/80">
+                  <span><strong className="text-brand-400">{newLeadsCount}</strong> NEW</span>
+                  <span><strong className="text-emerald-400">{wonLeadsCount}</strong> WON</span>
+                </div>
               </Card>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Left 2 Cols: Submissions List */}
-                <div className="lg:col-span-2 space-y-4">
-                  {filteredSubmissions.map((sub) => (
+
+              <Card className="p-5 border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase">
+                  <span>Active Pipeline</span>
+                  <TrendingUp className="w-4 h-4 text-blue-400" />
+                </div>
+                <div className="text-3xl font-extrabold text-blue-400">{activeLeadsCount}</div>
+                <div className="text-xs text-slate-400 pt-1 border-t border-slate-800/80">
+                  Leads in discussions & negotiations
+                </div>
+              </Card>
+
+              <Card className="p-5 border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase">
+                  <span>Total Quotations</span>
+                  <FileText className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="text-3xl font-extrabold text-emerald-400">{totalQuotationsCount}</div>
+                <div className="text-xs text-slate-400 flex items-center justify-between pt-1 border-t border-slate-800/80">
+                  <span><strong className="text-slate-200">{pendingQuotations.length}</strong> Pending</span>
+                  <span><strong className="text-emerald-400">{acceptedQuotations.length}</strong> Accepted</span>
+                </div>
+              </Card>
+
+              <Card className="p-5 border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase">
+                  <span>Pipeline Quotation Value</span>
+                  <Award className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="text-2xl font-extrabold text-amber-400 font-mono">
+                  {formatINR(totalQuotationValue)}
+                </div>
+                <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
+                  Accepted: <strong className="text-emerald-400">{formatINR(acceptedQuotationValue)}</strong>
+                </div>
+              </Card>
+            </div>
+
+            {/* Lead Pipeline Visual Distribution */}
+            <Card className="p-6 border-slate-800 space-y-4">
+              <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
+                Lead Pipeline Stages
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                {Object.entries(pipelineCounts).map(([stage, count]) => (
+                  <div key={stage} className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1 text-center">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight block truncate">
+                      {stage}
+                    </span>
+                    <span className={`text-xl font-extrabold block ${
+                      stage === 'WON' ? 'text-emerald-400' : stage === 'NEW' ? 'text-brand-400' : 'text-slate-200'
+                    }`}>
+                      {count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            {/* Tables Grid: Recent Leads & Recent Quotations */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Recent Leads Table */}
+              <Card className="p-6 border-slate-800 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h3 className="font-bold text-slate-200 text-base">Recent Leads</h3>
+                  <button
+                    onClick={() => setActiveTab('leads')}
+                    className="text-xs text-brand-400 hover:text-brand-300 font-semibold flex items-center gap-1"
+                  >
+                    View All Leads <ArrowUpRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {timeFilteredLeads.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-6 text-center">No leads recorded for selected period.</p>
+                ) : (
+                  <div className="divide-y divide-slate-800/80">
+                    {timeFilteredLeads.slice(0, 5).map(lead => (
+                      <div key={lead.id} className="py-3 flex items-center justify-between text-xs gap-3">
+                        <div>
+                          <div className="font-bold text-slate-100">{lead.fullName}</div>
+                          <div className="text-slate-400">{lead.serviceInterested} • <span className="text-brand-400">{lead.leadSource}</span></div>
+                        </div>
+                        <div className="text-right space-y-1">
+                          <Badge variant={getStatusBadgeVariant(lead.status)} className="text-[10px]">
+                            {lead.status}
+                          </Badge>
+                          <div className="text-[10px] text-slate-500">{new Date(lead.createdAt).toLocaleDateString()}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              {/* Recent Quotations Table */}
+              <Card className="p-6 border-slate-800 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h3 className="font-bold text-slate-200 text-base">Recent Proposals & Quotations</h3>
+                  <button
+                    onClick={() => setActiveTab('quotations')}
+                    className="text-xs text-brand-400 hover:text-brand-300 font-semibold flex items-center gap-1"
+                  >
+                    View All Quotations <ArrowUpRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {timeFilteredQuotations.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-6 text-center">No quotations generated yet.</p>
+                ) : (
+                  <div className="divide-y divide-slate-800/80">
+                    {timeFilteredQuotations.slice(0, 5).map(quo => (
+                      <div key={quo.id} className="py-3 flex items-center justify-between text-xs gap-3">
+                        <div>
+                          <div className="font-bold text-slate-100">{quo.quotationNumber} — {quo.clientName}</div>
+                          <div className="text-slate-400">{quo.projectName}</div>
+                        </div>
+                        <div className="text-right space-y-1">
+                          <div className="font-bold text-emerald-400 font-mono">{formatINR(quo.grandTotal)}</div>
+                          <Badge variant="slate" className="text-[10px]">
+                            {quo.status}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================== */}
+        {/* TAB 2: LEAD MANAGEMENT */}
+        {/* ==================================================== */}
+        {activeTab === 'leads' && (
+          <div className="space-y-6">
+            {/* Filter & Search Bar */}
+            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+              <div className="flex-1 relative">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  placeholder="Search leads by name, email, phone, company, or service..."
+                  value={leadSearch}
+                  onChange={(e) => setLeadSearch(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-200 outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <select
+                  value={leadStatusFilter}
+                  onChange={(e) => setLeadStatusFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none focus:border-brand-500"
+                >
+                  <option value="All">All Statuses ({leads.length})</option>
+                  <option value="NEW">NEW</option>
+                  <option value="CONTACTED">CONTACTED</option>
+                  <option value="REQUIREMENT RECEIVED">REQUIREMENT RECEIVED</option>
+                  <option value="PROPOSAL SENT">PROPOSAL SENT</option>
+                  <option value="NEGOTIATION">NEGOTIATION</option>
+                  <option value="WON">WON</option>
+                  <option value="LOST">LOST</option>
+                </select>
+
+                <select
+                  value={leadSourceFilter}
+                  onChange={(e) => setLeadSourceFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none focus:border-brand-500"
+                >
+                  <option value="All">All Sources</option>
+                  <option value="Website">Website</option>
+                  <option value="WhatsApp">WhatsApp</option>
+                  <option value="Referral">Referral</option>
+                  <option value="LinkedIn">LinkedIn</option>
+                  <option value="Instagram">Instagram</option>
+                  <option value="Facebook">Facebook</option>
+                  <option value="Google">Google</option>
+                  <option value="Other">Other</option>
+                </select>
+
+                <Button
+                  onClick={() => {
+                    setEditingLead({
+                      fullName: '',
+                      companyName: '',
+                      email: '',
+                      phone: '',
+                      serviceInterested: 'Website Development',
+                      budgetRange: '₹25,000 – ₹50,000',
+                      projectTimeline: 'Within 1 Month',
+                      messageRequirement: '',
+                      leadSource: 'Website',
+                      status: 'NEW'
+                    });
+                    setLeadModalOpen(true);
+                  }}
+                  variant="primary"
+                  size="sm"
+                  icon={<Plus className="w-4 h-4" />}
+                >
+                  + Add Lead
+                </Button>
+              </div>
+            </div>
+
+            {/* Main Lead Grid Layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left 2 Cols: Leads List */}
+              <div className="lg:col-span-2 space-y-4">
+                {loading ? (
+                  <div className="p-12 text-center text-slate-400 flex items-center justify-center gap-2">
+                    <RefreshCw className="w-5 h-5 animate-spin text-brand-400" />
+                    <span>Loading leads...</span>
+                  </div>
+                ) : filteredLeads.length === 0 ? (
+                  <Card className="p-12 text-center border-dashed border-slate-800">
+                    <Users className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                    <h3 className="text-lg font-bold text-slate-300">No leads found</h3>
+                    <p className="text-sm text-slate-500 mt-1">Leads captured via website contact form or added manually will appear here.</p>
+                  </Card>
+                ) : (
+                  filteredLeads.map(lead => (
                     <Card
-                      key={sub.id}
-                      onClick={() => setSelectedSubmission(sub)}
+                      key={lead.id}
+                      onClick={() => setSelectedLead(lead)}
                       className={`p-5 cursor-pointer border transition-all ${
-                        selectedSubmission?.id === sub.id
+                        selectedLead?.id === lead.id
                           ? 'border-brand-500 bg-slate-900'
                           : 'border-slate-800 hover:border-slate-700 bg-slate-900/40'
                       }`}
@@ -250,132 +746,383 @@ export const AdminDashboardPage: React.FC = () => {
                       <div className="flex items-start justify-between gap-4">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <h3 className="font-bold text-slate-100">{sub.name}</h3>
-                            {sub.companyName && (
+                            <h3 className="font-bold text-slate-100">{lead.fullName}</h3>
+                            {lead.companyName && (
                               <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400">
-                                {sub.companyName}
+                                {lead.companyName}
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-slate-400">{sub.email} • {sub.phone}</p>
+                          <p className="text-xs text-slate-400">{lead.email} • {lead.phone}</p>
                         </div>
-                        <Badge
-                          variant={
-                            sub.status === 'New'
-                              ? 'brand'
-                              : sub.status === 'Converted'
-                              ? 'status'
-                              : 'slate'
-                          }
-                        >
-                          {sub.status}
-                        </Badge>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge variant={getStatusBadgeVariant(lead.status)}>
+                            {lead.status}
+                          </Badge>
+                          <span className="text-[10px] text-brand-400 font-semibold bg-brand-500/10 px-2 py-0.5 rounded border border-brand-500/20">
+                            Source: {lead.leadSource}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                        <span><strong>Service:</strong> {sub.service}</span>
-                        <span><strong>Budget:</strong> {sub.budget}</span>
-                        <span>{new Date(sub.createdAt).toLocaleDateString()}</span>
+                        <span><strong>Service:</strong> {lead.serviceInterested}</span>
+                        <span><strong>Budget:</strong> {lead.budgetRange}</span>
+                        <span>{new Date(lead.createdAt).toLocaleDateString()}</span>
                       </div>
                     </Card>
-                  ))}
-                </div>
+                  ))
+                )}
+              </div>
 
-                {/* Right Col: Selected Submission Detail Drawer */}
-                <div className="lg:col-span-1">
-                  {selectedSubmission ? (
-                    <Card className="p-6 border-slate-800 sticky top-6 space-y-6">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                        <div>
-                          <h3 className="font-bold text-lg text-slate-100">{selectedSubmission.name}</h3>
-                          <p className="text-xs text-slate-400">{selectedSubmission.companyName || 'Individual'}</p>
+              {/* Right Col: Selected Lead Detail Drawer */}
+              <div className="lg:col-span-1">
+                {selectedLead ? (
+                  <Card className="p-6 border-slate-800 sticky top-24 space-y-6 max-h-[85vh] overflow-y-auto">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                      <div>
+                        <h3 className="font-bold text-lg text-slate-100">{selectedLead.fullName}</h3>
+                        <p className="text-xs text-slate-400">{selectedLead.companyName || 'Individual Client'}</p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedLead(null)}
+                        className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Status Changer */}
+                    <div>
+                      <span className="text-slate-500 font-semibold text-[10px] uppercase tracking-wider block mb-1">
+                        Change Lead Pipeline Status
+                      </span>
+                      <select
+                        value={selectedLead.status}
+                        onChange={(e) => handleLeadStatusChange(selectedLead.id, e.target.value as LeadStatus)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 text-xs outline-none focus:border-brand-500 font-bold"
+                      >
+                        <option value="NEW">NEW</option>
+                        <option value="CONTACTED">CONTACTED</option>
+                        <option value="REQUIREMENT RECEIVED">REQUIREMENT RECEIVED</option>
+                        <option value="PROPOSAL SENT">PROPOSAL SENT</option>
+                        <option value="NEGOTIATION">NEGOTIATION</option>
+                        <option value="WON">WON</option>
+                        <option value="LOST">LOST</option>
+                      </select>
+                    </div>
+
+                    {/* Quick Action Buttons */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        onClick={() => handleCreateQuotationFromLead(selectedLead)}
+                        variant="primary"
+                        size="sm"
+                        className="w-full text-xs"
+                        icon={<FileText className="w-3.5 h-3.5" />}
+                      >
+                        Create Quotation
+                      </Button>
+
+                      <a
+                        href={`https://wa.me/${selectedLead.phone.replace(/[^0-9+]/g, '')}?text=${encodeURIComponent(`Hi ${selectedLead.fullName}, regarding your enquiry with TanovaX for ${selectedLead.serviceInterested}...`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="py-2 px-3 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 rounded-xl text-center font-semibold text-xs transition-colors flex items-center justify-center gap-1.5"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>WhatsApp</span>
+                      </a>
+                    </div>
+
+                    {/* Details Breakdown */}
+                    <div className="space-y-3 text-xs border-t border-slate-800 pt-3">
+                      <div>
+                        <span className="text-slate-500 font-semibold uppercase text-[10px] block">Contact Info</span>
+                        <p className="text-slate-200 font-medium">{selectedLead.email || 'No Email'}</p>
+                        <p className="text-slate-200 font-medium">{selectedLead.phone || 'No Phone'}</p>
+                      </div>
+
+                      <div>
+                        <span className="text-slate-500 font-semibold uppercase text-[10px] block">Service & Budget</span>
+                        <p className="text-brand-400 font-bold">{selectedLead.serviceInterested}</p>
+                        <p className="text-slate-300">Budget: {selectedLead.budgetRange}</p>
+                        <p className="text-slate-400 text-[11px]">Timeline: {selectedLead.projectTimeline}</p>
+                      </div>
+
+                      <div>
+                        <span className="text-slate-500 font-semibold uppercase text-[10px] block">Requirement / Message</span>
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-slate-300 text-xs leading-relaxed whitespace-pre-wrap max-h-40 overflow-y-auto mt-1">
+                          {selectedLead.messageRequirement || 'No message recorded.'}
                         </div>
-                        <button
-                          onClick={() => setSelectedSubmission(null)}
-                          className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                      </div>
+
+                      {/* Follow-up date setter */}
+                      <div>
+                        <span className="text-slate-500 font-semibold uppercase text-[10px] block mb-1">Follow-up Date</span>
+                        <input
+                          type="date"
+                          value={selectedLead.followUpDate || ''}
+                          onChange={(e) => saveLeadRecord({ id: selectedLead.id, followUpDate: e.target.value })}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-slate-200 text-xs outline-none focus:border-brand-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Notes Section */}
+                    <div className="border-t border-slate-800 pt-4 space-y-3">
+                      <span className="text-slate-400 font-bold text-xs uppercase tracking-wider block">
+                        Lead Notes ({selectedLead.notes?.length || 0})
+                      </span>
+
+                      <form onSubmit={handleAddNote} className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Add a follow-up note..."
+                          value={newNoteText}
+                          onChange={(e) => setNewNoteText(e.target.value)}
+                          className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-brand-500"
+                        />
+                        <Button type="submit" variant="secondary" size="sm">
+                          Add Note
+                        </Button>
+                      </form>
+
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {selectedLead.notes && selectedLead.notes.length > 0 ? (
+                          selectedLead.notes.map(n => (
+                            <div key={n.id} className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs space-y-1">
+                              <p className="text-slate-300">{n.content}</p>
+                              <div className="text-[10px] text-slate-500 flex justify-between">
+                                <span>By {n.createdBy}</span>
+                                <span>{new Date(n.createdAt).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-[11px] text-slate-500">No notes added yet.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Edit & Delete Actions */}
+                    <div className="pt-4 border-t border-slate-800 flex justify-between gap-2">
+                      <Button
+                        onClick={() => {
+                          setEditingLead(selectedLead);
+                          setLeadModalOpen(true);
+                        }}
+                        variant="secondary"
+                        size="sm"
+                        icon={<Edit3 className="w-3.5 h-3.5" />}
+                      >
+                        Edit Lead
+                      </Button>
+
+                      <Button
+                        onClick={() => handleDeleteLead(selectedLead.id)}
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                        icon={<Trash2 className="w-3.5 h-3.5" />}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </Card>
+                ) : (
+                  <Card className="p-8 text-center border-slate-800 text-slate-500 text-xs">
+                    Select a lead from the list to view full details, add notes, update follow-up date, or generate a quotation.
+                  </Card>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================== */}
+        {/* TAB 3: QUOTATIONS & PROPOSALS */}
+        {/* ==================================================== */}
+        {activeTab === 'quotations' && (
+          <div className="space-y-6">
+            {/* Header & Filter Toolbar */}
+            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+              <div className="flex-1 relative">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  placeholder="Search quotations by quotation number, client name, company, or project..."
+                  value={quotationSearch}
+                  onChange={(e) => setQuotationSearch(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-200 outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <select
+                  value={quotationStatusFilter}
+                  onChange={(e) => setQuotationStatusFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none focus:border-brand-500"
+                >
+                  <option value="All">All Statuses ({quotations.length})</option>
+                  <option value="Draft">Draft</option>
+                  <option value="Sent">Sent</option>
+                  <option value="Viewed">Viewed</option>
+                  <option value="Accepted">Accepted</option>
+                  <option value="Rejected">Rejected</option>
+                  <option value="Expired">Expired</option>
+                </select>
+
+                <Button
+                  onClick={() => {
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    const validUntilDate = new Date();
+                    validUntilDate.setDate(validUntilDate.getDate() + 15);
+
+                    setEditingQuotation({
+                      clientName: '',
+                      companyName: '',
+                      email: '',
+                      phone: '',
+                      projectName: '',
+                      projectDescription: '',
+                      date: todayStr,
+                      validUntil: validUntilDate.toISOString().split('T')[0],
+                      deliveryTimeline: '2–3 Weeks',
+                      paymentTerms: '50% advance upon project kickoff, 50% upon delivery.',
+                      termsAndConditions: '1. Quotation valid for 15 days.\n2. Includes 30 days post-launch support.',
+                      status: 'Draft',
+                      taxRate: 18,
+                      lineItems: [
+                        {
+                          id: 'item_1',
+                          description: 'Custom Web / Application Development',
+                          quantity: 1,
+                          unitPrice: 35000,
+                          discount: 0,
+                          taxRate: 18,
+                          taxAmount: 6300,
+                          total: 41300
+                        }
+                      ]
+                    });
+                    setQuotationModalOpen(true);
+                  }}
+                  variant="primary"
+                  size="sm"
+                  icon={<Plus className="w-4 h-4" />}
+                >
+                  + Create Quotation
+                </Button>
+              </div>
+            </div>
+
+            {/* Quotations List Table */}
+            {loading ? (
+              <div className="p-12 text-center text-slate-400 flex items-center justify-center gap-2">
+                <RefreshCw className="w-5 h-5 animate-spin text-brand-400" />
+                <span>Loading proposals & quotations...</span>
+              </div>
+            ) : filteredQuotations.length === 0 ? (
+              <Card className="p-12 text-center border-dashed border-slate-800">
+                <FileText className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                <h3 className="text-lg font-bold text-slate-300">No quotations found</h3>
+                <p className="text-sm text-slate-500 mt-1">Create professional proposals for your leads to send itemized pricing.</p>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredQuotations.map(quo => (
+                  <Card key={quo.id} className="p-5 border-slate-800 space-y-4 flex flex-col justify-between">
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className="text-[10px] font-mono font-bold text-brand-400 bg-brand-500/10 px-2 py-0.5 rounded border border-brand-500/20">
+                            {quo.quotationNumber}
+                          </span>
+                          <h4 className="font-bold text-slate-100 text-base mt-1.5">{quo.clientName}</h4>
+                          {quo.companyName && <p className="text-xs text-slate-400">{quo.companyName}</p>}
+                        </div>
+
+                        <select
+                          value={quo.status}
+                          onChange={(e) => handleQuotationStatusChange(quo.id, e.target.value as QuotationStatus)}
+                          className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[10px] text-slate-200 outline-none font-bold"
                         >
-                          <X className="w-5 h-5" />
+                          <option value="Draft">Draft</option>
+                          <option value="Sent">Sent</option>
+                          <option value="Viewed">Viewed</option>
+                          <option value="Accepted">Accepted</option>
+                          <option value="Rejected">Rejected</option>
+                          <option value="Expired">Expired</option>
+                        </select>
+                      </div>
+
+                      <div className="text-xs text-slate-300">
+                        <strong className="text-slate-400 block text-[10px] uppercase">Project Name</strong>
+                        <span>{quo.projectName}</span>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] text-slate-500 uppercase block">Grand Total</span>
+                          <span className="text-lg font-bold font-mono text-emerald-400">{formatINR(quo.grandTotal)}</span>
+                        </div>
+                        <div className="text-right text-[10px] text-slate-500">
+                          <div>Date: {quo.date}</div>
+                          <div>Valid: {quo.validUntil}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-800 flex items-center justify-between gap-2">
+                      <Button
+                        onClick={() => setSelectedQuotationForPreview(quo)}
+                        variant="primary"
+                        size="sm"
+                        className="text-xs"
+                        icon={<Printer className="w-3.5 h-3.5" />}
+                      >
+                        Print / PDF
+                      </Button>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            setEditingQuotation(quo);
+                            setQuotationModalOpen(true);
+                          }}
+                          className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg"
+                          title="Edit Quotation"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          onClick={() => handleDuplicateQuotation(quo)}
+                          className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg"
+                          title="Duplicate Quotation"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteQuotation(quo.id)}
+                          className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg"
+                          title="Delete Quotation"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
-
-                      <div className="space-y-4 text-xs">
-                        <div>
-                          <span className="text-slate-500 font-semibold uppercase block">Update Status</span>
-                          <select
-                            value={selectedSubmission.status}
-                            onChange={(e) => handleStatusChange(selectedSubmission.id, e.target.value as SubmissionStatus)}
-                            className="mt-1.5 w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 text-xs outline-none focus:border-brand-500"
-                          >
-                            <option value="New">New</option>
-                            <option value="Contacted">Contacted</option>
-                            <option value="In Discussion">In Discussion</option>
-                            <option value="Proposal Sent">Proposal Sent</option>
-                            <option value="Converted">Converted</option>
-                            <option value="Closed">Closed</option>
-                          </select>
-                        </div>
-
-                        <div className="space-y-2 pt-2 border-t border-slate-800">
-                          <div>
-                            <span className="text-slate-500 font-semibold uppercase block">Contact Details</span>
-                            <p className="text-slate-200 font-medium">{selectedSubmission.email}</p>
-                            <p className="text-slate-200 font-medium">{selectedSubmission.phone}</p>
-                          </div>
-
-                          <div>
-                            <span className="text-slate-500 font-semibold uppercase block">Requested Service</span>
-                            <p className="text-slate-200 font-semibold text-sm text-brand-400">{selectedSubmission.service}</p>
-                          </div>
-
-                          <div>
-                            <span className="text-slate-500 font-semibold uppercase block">Estimated Budget</span>
-                            <p className="text-slate-200 font-medium">{selectedSubmission.budget}</p>
-                          </div>
-
-                          <div>
-                            <span className="text-slate-500 font-semibold uppercase block">Submitted At</span>
-                            <p className="text-slate-400">{new Date(selectedSubmission.createdAt).toLocaleString()}</p>
-                          </div>
-                        </div>
-
-                        <div className="pt-2 border-t border-slate-800 space-y-1.5">
-                          <span className="text-slate-500 font-semibold uppercase block">Project Description</span>
-                          <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-slate-300 text-xs leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto">
-                            {selectedSubmission.message}
-                          </div>
-                        </div>
-
-                        <div className="pt-4 flex gap-2">
-                          <a
-                            href={`mailto:${selectedSubmission.email}`}
-                            className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-center font-semibold transition-colors"
-                          >
-                            Reply via Email
-                          </a>
-                          <a
-                            href={`https://wa.me/${selectedSubmission.phone.replace(/[^0-9+]/g, '')}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="py-2 px-3 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 rounded-xl text-center font-semibold transition-colors flex items-center justify-center"
-                          >
-                            WhatsApp
-                          </a>
-                        </div>
-                      </div>
-                    </Card>
-                  ) : (
-                    <Card className="p-8 text-center border-slate-800 text-slate-500 text-xs">
-                      Select an enquiry from the list to view detailed message and update lead status.
-                    </Card>
-                  )}
-                </div>
+                    </div>
+                  </Card>
+                ))}
               </div>
             )}
           </div>
         )}
 
         {/* ==================================================== */}
-        {/* TAB 2: PROJECTS MANAGEMENT */}
+        {/* TAB 4: PROJECTS MANAGEMENT */}
         {/* ==================================================== */}
         {activeTab === 'projects' && (
           <div className="space-y-6">
@@ -484,7 +1231,7 @@ export const AdminDashboardPage: React.FC = () => {
         )}
 
         {/* ==================================================== */}
-        {/* TAB 3: WHATSAPP & SITE SETTINGS */}
+        {/* TAB 5: WHATSAPP & SITE SETTINGS */}
         {/* ==================================================== */}
         {activeTab === 'settings' && (
           <div className="max-w-3xl space-y-6">
@@ -562,7 +1309,366 @@ export const AdminDashboardPage: React.FC = () => {
         )}
       </main>
 
-      {/* Project Add/Edit Modal */}
+      {/* ==================================================== */}
+      {/* MODAL 1: LEAD ADD / EDIT MODAL */}
+      {/* ==================================================== */}
+      {leadModalOpen && editingLead && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <h3 className="font-bold text-lg text-slate-100">
+                {editingLead.id ? 'Edit Lead Record' : 'Add New Business Lead'}
+              </h3>
+              <button
+                onClick={() => {
+                  setLeadModalOpen(false);
+                  setEditingLead(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveLead} className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingLead.fullName || ''}
+                    onChange={(e) => setEditingLead({ ...editingLead, fullName: e.target.value })}
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Company Name</label>
+                  <input
+                    type="text"
+                    value={editingLead.companyName || ''}
+                    onChange={(e) => setEditingLead({ ...editingLead, companyName: e.target.value })}
+                    placeholder="e.g. Apex Enterprises"
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    value={editingLead.email || ''}
+                    onChange={(e) => setEditingLead({ ...editingLead, email: e.target.value })}
+                    placeholder="rahul@company.com"
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Phone Number</label>
+                  <input
+                    type="tel"
+                    value={editingLead.phone || ''}
+                    onChange={(e) => setEditingLead({ ...editingLead, phone: e.target.value })}
+                    placeholder="+91 98765 43210"
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Service Interested</label>
+                  <input
+                    type="text"
+                    value={editingLead.serviceInterested || 'Website Development'}
+                    onChange={(e) => setEditingLead({ ...editingLead, serviceInterested: e.target.value })}
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Budget Range</label>
+                  <select
+                    value={editingLead.budgetRange || '₹25,000 – ₹50,000'}
+                    onChange={(e) => setEditingLead({ ...editingLead, budgetRange: e.target.value })}
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  >
+                    <option value="Under ₹25,000">Under ₹25,000</option>
+                    <option value="₹25,000 – ₹50,000">₹25,000 – ₹50,000</option>
+                    <option value="₹50,000 – ₹1,00,000">₹50,000 – ₹1,00,000</option>
+                    <option value="₹1,00,000+">₹1,00,000+</option>
+                    <option value="Not Sure">Not Sure</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Lead Source</label>
+                  <select
+                    value={editingLead.leadSource || 'Website'}
+                    onChange={(e) => setEditingLead({ ...editingLead, leadSource: e.target.value as LeadSource })}
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  >
+                    <option value="Website">Website</option>
+                    <option value="WhatsApp">WhatsApp</option>
+                    <option value="Referral">Referral</option>
+                    <option value="LinkedIn">LinkedIn</option>
+                    <option value="Instagram">Instagram</option>
+                    <option value="Facebook">Facebook</option>
+                    <option value="Google">Google</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 uppercase font-semibold mb-1">Requirement / Message</label>
+                <textarea
+                  rows={3}
+                  value={editingLead.messageRequirement || ''}
+                  onChange={(e) => setEditingLead({ ...editingLead, messageRequirement: e.target.value })}
+                  placeholder="Details of what the client requires..."
+                  className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setLeadModalOpen(false);
+                    setEditingLead(null);
+                  }}
+                  variant="ghost"
+                  size="sm"
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" size="sm">
+                  Save Lead Record
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================== */}
+      {/* MODAL 2: QUOTATION CREATE / EDIT MODAL */}
+      {/* ==================================================== */}
+      {quotationModalOpen && editingQuotation && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-6 space-y-6 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <h3 className="font-bold text-lg text-slate-100">
+                {editingQuotation.id ? `Edit Proposal ${editingQuotation.quotationNumber}` : 'Generate New Proposal / Quotation'}
+              </h3>
+              <button
+                onClick={() => {
+                  setQuotationModalOpen(false);
+                  setEditingQuotation(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuotation} className="space-y-6 text-xs">
+              {/* Client Header Info */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Client Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingQuotation.clientName || ''}
+                    onChange={(e) => setEditingQuotation({ ...editingQuotation, clientName: e.target.value })}
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Company Name</label>
+                  <input
+                    type="text"
+                    value={editingQuotation.companyName || ''}
+                    onChange={(e) => setEditingQuotation({ ...editingQuotation, companyName: e.target.value })}
+                    placeholder="e.g. Apex Corp"
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={editingQuotation.email || ''}
+                    onChange={(e) => setEditingQuotation({ ...editingQuotation, email: e.target.value })}
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Phone</label>
+                  <input
+                    type="text"
+                    value={editingQuotation.phone || ''}
+                    onChange={(e) => setEditingQuotation({ ...editingQuotation, phone: e.target.value })}
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Project Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingQuotation.projectName || ''}
+                    onChange={(e) => setEditingQuotation({ ...editingQuotation, projectName: e.target.value })}
+                    placeholder="Website Development"
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 uppercase font-semibold mb-1">Tax / GST %</label>
+                  <input
+                    type="number"
+                    value={editingQuotation.taxRate !== undefined ? editingQuotation.taxRate : 18}
+                    onChange={(e) => setEditingQuotation({ ...editingQuotation, taxRate: parseFloat(e.target.value) || 0 })}
+                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+              </div>
+
+              {/* Dynamic Line Items Editor */}
+              <div className="space-y-3 pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-200 font-bold uppercase text-xs">Itemized Deliverables & Pricing</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const items = editingQuotation.lineItems || [];
+                      const newItem: QuotationLineItem = {
+                        id: 'item_' + Date.now(),
+                        description: 'Custom Service Module',
+                        quantity: 1,
+                        unitPrice: 10000,
+                        discount: 0,
+                        taxRate: editingQuotation.taxRate || 18,
+                        taxAmount: 1800,
+                        total: 11800
+                      };
+                      setEditingQuotation({ ...editingQuotation, lineItems: [...items, newItem] });
+                    }}
+                    className="text-xs font-semibold text-brand-400 hover:text-brand-300 flex items-center gap-1"
+                  >
+                    + Add Line Item
+                  </button>
+                </div>
+
+                {editingQuotation.lineItems?.map((item, idx) => (
+                  <div key={item.id || idx} className="bg-slate-950 p-3 rounded-xl border border-slate-800 grid grid-cols-12 gap-2 items-center">
+                    <div className="col-span-5">
+                      <input
+                        type="text"
+                        placeholder="Description (e.g. CRM System Development)"
+                        value={item.description}
+                        onChange={(e) => {
+                          const updated = [...(editingQuotation.lineItems || [])];
+                          updated[idx].description = e.target.value;
+                          setEditingQuotation({ ...editingQuotation, lineItems: updated });
+                        }}
+                        className="w-full p-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        placeholder="Qty"
+                        value={item.quantity}
+                        onChange={(e) => {
+                          const updated = [...(editingQuotation.lineItems || [])];
+                          updated[idx].quantity = parseInt(e.target.value) || 1;
+                          setEditingQuotation({ ...editingQuotation, lineItems: updated });
+                        }}
+                        className="w-full p-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs text-center"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        placeholder="Unit Price"
+                        value={item.unitPrice}
+                        onChange={(e) => {
+                          const updated = [...(editingQuotation.lineItems || [])];
+                          updated[idx].unitPrice = parseFloat(e.target.value) || 0;
+                          setEditingQuotation({ ...editingQuotation, lineItems: updated });
+                        }}
+                        className="w-full p-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs text-right"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        placeholder="Discount"
+                        value={item.discount || 0}
+                        onChange={(e) => {
+                          const updated = [...(editingQuotation.lineItems || [])];
+                          updated[idx].discount = parseFloat(e.target.value) || 0;
+                          setEditingQuotation({ ...editingQuotation, lineItems: updated });
+                        }}
+                        className="w-full p-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs text-right text-emerald-400"
+                      />
+                    </div>
+                    <div className="col-span-1 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = (editingQuotation.lineItems || []).filter((_, i) => i !== idx);
+                          setEditingQuotation({ ...editingQuotation, lineItems: updated });
+                        }}
+                        className="text-red-400 hover:text-red-300 p-1"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setQuotationModalOpen(false);
+                    setEditingQuotation(null);
+                  }}
+                  variant="ghost"
+                  size="sm"
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" size="sm">
+                  Save Proposal / Quotation
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================== */}
+      {/* MODAL 3: PROJECT ADD / EDIT MODAL */}
+      {/* ==================================================== */}
       {projectModalOpen && editingProject && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto">
@@ -644,76 +1750,6 @@ export const AdminDashboardPage: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-400 uppercase font-semibold mb-1">Business Problem</label>
-                  <textarea
-                    rows={3}
-                    value={editingProject.businessProblem || ''}
-                    onChange={(e) => setEditingProject({ ...editingProject, businessProblem: e.target.value })}
-                    placeholder="Challenges faced by the client"
-                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 uppercase font-semibold mb-1">Solution</label>
-                  <textarea
-                    rows={3}
-                    value={editingProject.solution || ''}
-                    onChange={(e) => setEditingProject({ ...editingProject, solution: e.target.value })}
-                    placeholder="How TanovaX solved the problem"
-                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 uppercase font-semibold mb-1">Key Features (Comma Separated)</label>
-                <input
-                  type="text"
-                  value={editingProject.features?.join(', ') || ''}
-                  onChange={(e) => setEditingProject({ ...editingProject, features: e.target.value.split(',').map(s => s.trim()) })}
-                  placeholder="Patient Intake, Appointment Scheduling, Billing"
-                  className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-400 uppercase font-semibold mb-1">Technologies (Comma Separated)</label>
-                  <input
-                    type="text"
-                    value={editingProject.technologies?.join(', ') || ''}
-                    onChange={(e) => setEditingProject({ ...editingProject, technologies: e.target.value.split(',').map(s => s.trim()) })}
-                    placeholder="React, TypeScript, Firebase"
-                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 uppercase font-semibold mb-1">Project Image URL</label>
-                  <input
-                    type="text"
-                    value={editingProject.images?.[0] || ''}
-                    onChange={(e) => setEditingProject({ ...editingProject, images: [e.target.value] })}
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 uppercase font-semibold mb-1">Project Objective</label>
-                <input
-                  type="text"
-                  value={editingProject.objective || ''}
-                  onChange={(e) => setEditingProject({ ...editingProject, objective: e.target.value })}
-                  placeholder="Objective statement (no fake numerical metrics)"
-                  className="w-full p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-slate-100 outline-none focus:border-brand-500"
-                />
-              </div>
-
               <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
                 <Button
                   type="button"
@@ -733,6 +1769,16 @@ export const AdminDashboardPage: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* ==================================================== */}
+      {/* MODAL 4: QUOTATION PREVIEW / PRINT MODAL */}
+      {/* ==================================================== */}
+      {selectedQuotationForPreview && (
+        <QuotationPreviewModal
+          quotation={selectedQuotationForPreview}
+          onClose={() => setSelectedQuotationForPreview(null)}
+        />
       )}
     </div>
   );

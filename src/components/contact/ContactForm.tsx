@@ -4,6 +4,7 @@ import { Send, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { submitContactForm } from '../../firebase/services';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { ProjectTimeline } from '../../types';
 
 export const ContactForm: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -16,6 +17,7 @@ export const ContactForm: React.FC = () => {
     phone: '',
     service: preselectedService || 'Business Website',
     budget: '₹25,000 – ₹50,000',
+    timeline: 'Within 1 Month' as ProjectTimeline,
     message: ''
   });
 
@@ -30,6 +32,7 @@ export const ContactForm: React.FC = () => {
   }, [preselectedService]);
 
   const serviceOptions = [
+    'Website Development',
     'Business Website',
     'Company Website',
     'Portfolio Website',
@@ -41,23 +44,32 @@ export const ContactForm: React.FC = () => {
     'Employee Management',
     'Dashboard',
     'Customer Portal',
+    'Custom Application',
+    'Automation',
     'Other'
   ];
 
   const budgetOptions = [
-    'Below ₹10,000',
-    '₹10,000 – ₹25,000',
+    'Under ₹25,000',
     '₹25,000 – ₹50,000',
     '₹50,000 – ₹1,00,000',
     '₹1,00,000+',
-    'Not sure yet'
+    'Not Sure'
+  ];
+
+  const timelineOptions: ProjectTimeline[] = [
+    'Urgent',
+    'Within 1 Month',
+    '1–3 Months',
+    '3+ Months',
+    'Flexible'
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim() || !formData.email.trim() || !formData.phone.trim() || !formData.message.trim()) {
+    if (!formData.name.trim() || (!formData.email.trim() && !formData.phone.trim()) || !formData.message.trim()) {
       setStatus('error');
-      setErrorMessage('Please fill in all required fields.');
+      setErrorMessage('Please provide your name, message, and at least a phone number or email address.');
       return;
     }
 
@@ -73,6 +85,7 @@ export const ContactForm: React.FC = () => {
         phone: formData.phone.trim(),
         service: formData.service,
         budget: formData.budget,
+        projectTimeline: formData.timeline,
         message: formData.message.trim()
       });
 
@@ -85,6 +98,7 @@ export const ContactForm: React.FC = () => {
           phone: '',
           service: 'Business Website',
           budget: '₹25,000 – ₹50,000',
+          timeline: 'Within 1 Month',
           message: ''
         });
       } else {
@@ -166,11 +180,11 @@ export const ContactForm: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
           {/* Service Required */}
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              Service Required <span className="text-brand-400">*</span>
+              Service Interested <span className="text-brand-400">*</span>
             </label>
             <select
               value={formData.service}
@@ -202,12 +216,30 @@ export const ContactForm: React.FC = () => {
               ))}
             </select>
           </div>
+
+          {/* Project Timeline */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+              Project Timeline
+            </label>
+            <select
+              value={formData.timeline}
+              onChange={(e) => setFormData({ ...formData, timeline: e.target.value as ProjectTimeline })}
+              className="w-full px-4 py-3 bg-slate-950 rounded-xl border border-slate-800 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-slate-100 text-sm outline-none transition-all"
+            >
+              {timelineOptions.map((t, idx) => (
+                <option key={idx} value={t} className="bg-slate-900 text-slate-200">
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Project Description */}
         <div>
           <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-            Project Description <span className="text-brand-400">*</span>
+            Requirement / Project Message <span className="text-brand-400">*</span>
           </label>
           <textarea
             required
@@ -224,7 +256,7 @@ export const ContactForm: React.FC = () => {
           <div className="p-4 rounded-xl bg-emerald-950/80 border border-emerald-500/50 flex items-start gap-3 text-emerald-200 text-sm">
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold">Thank you.</span> Your project enquiry has been received. We'll get back to you soon.
+              <span className="font-bold">Thank you for contacting TanovaX.</span> Your enquiry has been received. Our team will get back to you shortly.
             </div>
           </div>
         )}

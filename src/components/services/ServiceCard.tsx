@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Briefcase, 
@@ -12,16 +12,24 @@ import {
   UserCheck, 
   BarChart3, 
   ShieldCheck, 
-  ArrowRight 
+  ArrowRight,
+  MessageSquare
 } from 'lucide-react';
-import { ServiceItem } from '../../types';
+import { ServiceItem, SiteSettings } from '../../types';
 import { Card } from '../ui/Card';
+import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, trackWhatsAppClick } from '../../firebase/services';
 
 interface ServiceCardProps {
   service: ServiceItem;
 }
 
 export const ServiceCard: React.FC<ServiceCardProps> = ({ service }) => {
+  const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
+
+  useEffect(() => {
+    fetchSiteSettings().then(setSettings);
+  }, []);
+
   const getIcon = (name: string) => {
     const props = { className: 'w-6 h-6 text-brand-400' };
     switch (name) {
@@ -38,6 +46,14 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({ service }) => {
       case 'ShieldCheck': return <ShieldCheck {...props} />;
       default: return <Briefcase {...props} />;
     }
+  };
+
+  const handleWhatsAppClick = () => {
+    trackWhatsAppClick(service.name);
+    const cleanNumber = settings.whatsappNumber.replace(/[^0-9+]/g, '');
+    const serviceMsg = `Hi TanovaX, I am interested in your ${service.name} service. I would like to discuss my requirements.`;
+    const url = `https://wa.me/${cleanNumber}?text=${encodeURIComponent(serviceMsg)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -71,15 +87,24 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({ service }) => {
         )}
       </div>
 
-      {/* Action Footer Link */}
-      <div className="pt-6 mt-4 border-t border-slate-800/80 flex items-center justify-between">
+      {/* Action Footer Links */}
+      <div className="pt-6 mt-4 border-t border-slate-800/80 flex items-center justify-between gap-2">
         <Link
           to={`/contact?service=${encodeURIComponent(service.name)}`}
-          className="inline-flex items-center gap-2 text-xs font-semibold text-brand-400 hover:text-brand-300 transition-colors group/link"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-400 hover:text-brand-300 transition-colors group/link"
         >
-          <span>Learn More & Build</span>
+          <span>Enquire Now</span>
           <ArrowRight className="w-3.5 h-3.5 group-hover/link:translate-x-1 transition-transform" />
         </Link>
+
+        <button
+          onClick={handleWhatsAppClick}
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-2.5 py-1.5 rounded-lg transition-all"
+          title="Chat on WhatsApp about this service"
+        >
+          <MessageSquare className="w-3.5 h-3.5" />
+          <span>WhatsApp</span>
+        </button>
       </div>
     </Card>
   );
