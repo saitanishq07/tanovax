@@ -84,12 +84,15 @@ Object.keys(routesMetadata).forEach((route) => {
     fs.writeFileSync(indexHtmlPath, customHtml, 'utf8');
     console.log(`✓ Injected pre-rendered static metadata into dist/index.html (${meta.canonical})`);
   } else {
+    // Write both dist/route.html and dist/route/index.html for universal host compatibility
+    fs.writeFileSync(path.join(distDir, `${route}.html`), customHtml, 'utf8');
+
     const routeDir = path.join(distDir, route);
     if (!fs.existsSync(routeDir)) {
       fs.mkdirSync(routeDir, { recursive: true });
     }
     fs.writeFileSync(path.join(routeDir, 'index.html'), customHtml, 'utf8');
-    console.log(`✓ Injected pre-rendered static entry: dist/${route}/index.html (${meta.canonical})`);
+    console.log(`✓ Injected pre-rendered static entries: dist/${route}.html & dist/${route}/index.html (${meta.canonical})`);
   }
 });
 
