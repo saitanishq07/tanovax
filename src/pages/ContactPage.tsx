@@ -1,11 +1,24 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/layout/Layout';
 import { ContactForm } from '../components/contact/ContactForm';
 import { Card } from '../components/ui/Card';
 import { Mail, Phone, MessageSquare, Clock, MapPin } from 'lucide-react';
 import { siteConfig } from '../config/siteConfig';
+import { fetchSiteSettings, DEFAULT_SITE_SETTINGS } from '../firebase/services';
+import { SiteSettings } from '../types';
 
 export const ContactPage: React.FC = () => {
+  const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
+
+  useEffect(() => {
+    fetchSiteSettings().then(setSettings);
+  }, []);
+
+  const cleanWhatsappNumber = (settings.whatsappNumber || siteConfig.whatsappNumber).replace(/[^0-9+]/g, '');
+  const whatsappUrl = `https://wa.me/${cleanWhatsappNumber}?text=${encodeURIComponent(
+    settings.whatsappMessage || 'Hello TanovaX team! I am interested in starting a project.'
+  )}`;
+
   return (
     <Layout
       title="Contact TanovaX | Web & Business Solutions"
@@ -55,9 +68,7 @@ export const ContactPage: React.FC = () => {
                   Prefer instant messaging? Reach out directly on WhatsApp to start a conversation.
                 </p>
                 <a
-                  href={`https://wa.me/${siteConfig.whatsappNumber.replace(/[^0-9+]/g, '')}?text=${encodeURIComponent(
-                    'Hello TanovaX team! I am interested in starting a project.'
-                  )}`}
+                  href={whatsappUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors"
@@ -73,35 +84,35 @@ export const ContactPage: React.FC = () => {
                   <Mail className="w-5 h-5 text-brand-400 shrink-0 mt-0.5" />
                   <div>
                     <span className="text-xs text-slate-400 block font-semibold uppercase">Email</span>
-                    <a href={`mailto:${siteConfig.email}`} className="text-slate-200 text-sm font-semibold hover:text-brand-400 transition-colors">
+                    <a href={`mailto:${siteConfig.email}`} className="text-sm font-semibold text-slate-200 hover:text-brand-400 transition-colors">
                       {siteConfig.email}
                     </a>
                   </div>
                 </div>
 
-                <div className="flex items-start gap-3 pt-3 border-t border-slate-800">
+                <div className="flex items-start gap-3">
                   <Phone className="w-5 h-5 text-brand-400 shrink-0 mt-0.5" />
                   <div>
-                    <span className="text-xs text-slate-400 block font-semibold uppercase">Phone</span>
-                    <a href={`tel:${siteConfig.phone}`} className="text-slate-200 text-sm font-semibold hover:text-brand-400 transition-colors">
+                    <span className="text-xs text-slate-400 block font-semibold uppercase">Direct Call / WhatsApp</span>
+                    <a href={`tel:${siteConfig.phone}`} className="text-sm font-semibold text-slate-200 hover:text-brand-400 transition-colors">
                       {siteConfig.phone}
                     </a>
                   </div>
                 </div>
 
-                <div className="flex items-start gap-3 pt-3 border-t border-slate-800">
+                <div className="flex items-start gap-3">
                   <Clock className="w-5 h-5 text-brand-400 shrink-0 mt-0.5" />
                   <div>
                     <span className="text-xs text-slate-400 block font-semibold uppercase">Response Time</span>
-                    <span className="text-slate-300 text-xs">Within 12 to 24 Business Hours</span>
+                    <span className="text-sm text-slate-300 font-medium">Within 24 Hours</span>
                   </div>
                 </div>
 
-                <div className="flex items-start gap-3 pt-3 border-t border-slate-800">
+                <div className="flex items-start gap-3">
                   <MapPin className="w-5 h-5 text-brand-400 shrink-0 mt-0.5" />
                   <div>
                     <span className="text-xs text-slate-400 block font-semibold uppercase">Location</span>
-                    <span className="text-slate-300 text-xs">{siteConfig.location}</span>
+                    <span className="text-sm text-slate-300 font-medium">{siteConfig.location}</span>
                   </div>
                 </div>
               </Card>

@@ -54,3 +54,8 @@ export interface FAQItem {
   question: string;
   answer: string;
 }
+
+export interface SiteSettings {
+  whatsappMessage: string;
+  whatsappNumber: string;
+}

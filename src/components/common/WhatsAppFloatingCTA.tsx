@@ -1,11 +1,19 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { siteConfig } from '../../config/siteConfig';
+import { fetchSiteSettings, DEFAULT_SITE_SETTINGS } from '../../firebase/services';
+import { SiteSettings } from '../../types';
 
 export const WhatsAppFloatingCTA: React.FC = () => {
-  const cleanNumber = siteConfig.whatsappNumber.replace(/[^0-9+]/g, '');
+  const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
+
+  useEffect(() => {
+    fetchSiteSettings().then(setSettings);
+  }, []);
+
+  const cleanNumber = (settings.whatsappNumber || siteConfig.whatsappNumber).replace(/[^0-9+]/g, '');
   const whatsappUrl = `https://wa.me/${cleanNumber}?text=${encodeURIComponent(
-    `Hello TanovaX team! I am interested in starting a project for my business.`
+    settings.whatsappMessage || 'Hello TanovaX team! I am interested in starting a project for my business.'
   )}`;
 
   return (

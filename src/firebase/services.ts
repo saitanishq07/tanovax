@@ -3,18 +3,26 @@ import {
   addDoc, 
   getDocs, 
   doc, 
+  getDoc,
+  setDoc,
   updateDoc, 
   deleteDoc, 
   query, 
   orderBy 
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from './config';
-import { ContactSubmission, Project } from '../types';
+import { ContactSubmission, Project, SiteSettings } from '../types';
 import { initialProjects } from '../data/initialData';
 
 // LocalStorage Keys
 const SUBMISSIONS_KEY = 'tanovax_contact_submissions';
 const PROJECTS_KEY = 'tanovax_custom_projects';
+const SETTINGS_KEY = 'tanovax_site_settings';
+
+export const DEFAULT_SITE_SETTINGS: SiteSettings = {
+  whatsappMessage: 'Hello TanovaX team! I am interested in starting a project for my business.',
+  whatsappNumber: '+916300699087'
+};
 
 // Helper for Local Storage Submissions
 const getLocalSubmissions = (): ContactSubmission[] => {
@@ -114,16 +122,17 @@ export const getContactSubmissions = async (): Promise<ContactSubmission[]> => {
         });
       });
 
-      // Merge cloud and local uniquely by ID/email+timestamp
-      const combined = [...cloudDocs];
-      localList.forEach(loc => {
-        if (!combined.some(c => c.id === loc.id || (c.email === loc.email && c.createdAt === loc.createdAt))) {
-          combined.push(loc);
-        }
-      });
-      return combined.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      // Merge cloud and local submissions seamlessly
+      const map = new Map<string, ContactSubmission>();
+      localList.forEach(s => map.set(s.id, s));
+      cloudDocs.forEach(s => map.set(s.id, s));
+      
+      const merged = Array.from(map.values()).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      return merged;
     } catch (err) {
-      console.warn('Firebase read failed, using local storage fallback:', err);
+      console.warn('Firebase read submissions failed, using local storage:', err);
     }
   }
 
@@ -131,16 +140,16 @@ export const getContactSubmissions = async (): Promise<ContactSubmission[]> => {
 };
 
 export const updateSubmissionStatus = async (id: string, status: ContactSubmission['status']): Promise<boolean> => {
-  const current = getLocalSubmissions();
-  const updated = current.map(item => item.id === id ? { ...item, status } : item);
-  saveLocalSubmissions(updated);
+  const localList = getLocalSubmissions();
+  const updatedLocal = localList.map(s => (s.id === id ? { ...s, status } : s));
+  saveLocalSubmissions(updatedLocal);
 
   if (isFirebaseConfigured && !id.startsWith('sub_')) {
     try {
       const docRef = doc(db, 'contact_submissions', id);
       await updateDoc(docRef, { status });
     } catch (err) {
-      console.warn('Firebase update status failed:', err);
+      console.warn('Firebase status update failed:', err);
     }
   }
 
@@ -252,4 +261,50 @@ export const deleteProjectRecord = async (id: string): Promise<boolean> => {
   }
 
   return true;
+};
+
+// --- SITE SETTINGS SERVICES ---
+
+export const fetchSiteSettings = async (): Promise<SiteSettings> => {
+  if (isFirebaseConfigured) {
+    try {
+      const docRef = doc(db, 'settings', 'site');
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        return {
+          whatsappMessage: data.whatsappMessage || DEFAULT_SITE_SETTINGS.whatsappMessage,
+          whatsappNumber: data.whatsappNumber || DEFAULT_SITE_SETTINGS.whatsappNumber
+        };
+      }
+    } catch (err) {
+      console.warn('Firebase fetch settings failed, using local/default:', err);
+    }
+  }
+
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    return raw ? JSON.parse(raw) : DEFAULT_SITE_SETTINGS;
+  } catch (e) {
+    return DEFAULT_SITE_SETTINGS;
+  }
+};
+
+export const saveSiteSettings = async (settings: SiteSettings): Promise<SiteSettings> => {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch (e) {
+    console.error('Error saving settings to local storage', e);
+  }
+
+  if (isFirebaseConfigured) {
+    try {
+      const docRef = doc(db, 'settings', 'site');
+      await setDoc(docRef, settings, { merge: true });
+    } catch (err) {
+      console.warn('Firebase save settings failed:', err);
+    }
+  }
+
+  return settings;
 };

@@ -10,11 +10,24 @@ import { ServiceCard } from '../components/services/ServiceCard';
 import { ProjectCard } from '../components/portfolio/ProjectCard';
 import { siteConfig } from '../config/siteConfig';
 
+import { fetchSiteSettings, DEFAULT_SITE_SETTINGS } from '../firebase/services';
+import { SiteSettings } from '../types';
+
 export const HomePage: React.FC = () => {
   const [openFaq, setOpenFaq] = React.useState<number | null>(0);
+  const [settings, setSettings] = React.useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
+
+  React.useEffect(() => {
+    fetchSiteSettings().then(setSettings);
+  }, []);
 
   const websiteServices = servicesData.filter(s => s.category === 'WEBSITE DEVELOPMENT');
   const appServices = servicesData.filter(s => s.category === 'BUSINESS APPLICATIONS');
+
+  const cleanWhatsappNumber = (settings.whatsappNumber || siteConfig.whatsappNumber).replace(/[^0-9+]/g, '');
+  const homepageWhatsappUrl = `https://wa.me/${cleanWhatsappNumber}?text=${encodeURIComponent(
+    settings.whatsappMessage || 'Hello TanovaX team! I am interested in starting a project for my business.'
+  )}`;
 
   return (
     <Layout
@@ -294,7 +307,7 @@ export const HomePage: React.FC = () => {
                 Start a Project
               </Button>
               <Button
-                href={`https://wa.me/${siteConfig.whatsappNumber.replace(/[^0-9+]/g, '')}`}
+                href={homepageWhatsappUrl}
                 variant="secondary"
                 size="lg"
                 icon={<MessageSquare className="w-5 h-5 text-emerald-400" />}
