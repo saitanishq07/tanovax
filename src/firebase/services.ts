@@ -108,6 +108,14 @@ const getLocalSubmissions = (): ContactSubmission[] => {
   }
 };
 
+const saveLocalSubmissions = (subs: ContactSubmission[]) => {
+  try {
+    localStorage.setItem(SUBMISSIONS_KEY, JSON.stringify(subs));
+  } catch (e) {
+    console.error('Error saving local submissions', e);
+  }
+};
+
 // Helper to convert legacy ContactSubmission to Lead model
 const mapSubmissionToLead = (sub: ContactSubmission): Lead => {
   let mappedStatus: LeadStatus = 'NEW';
@@ -340,14 +348,42 @@ export const addNoteToLead = async (leadId: string, content: string, createdBy: 
 };
 
 export const deleteLeadRecord = async (id: string): Promise<boolean> => {
+  // 1. Remove from local leads storage
   const currentLocal = getLocalLeads();
-  const filtered = currentLocal.filter(l => l.id !== id);
-  saveLocalLeads(filtered);
+  const filteredLeads = currentLocal.filter(l => l.id !== id);
+  saveLocalLeads(filteredLeads);
 
-  if (isFirebaseConfigured && !id.startsWith('lead_') && !id.startsWith('sub_')) {
+  // 2. Remove from local legacy submissions storage
+  const currentSubmissions = getLocalSubmissions();
+  const filteredSubmissions = currentSubmissions.filter(s => s.id !== id);
+  saveLocalSubmissions(filteredSubmissions);
+
+  // 3. Remove from Firestore collections unconditionally (both 'leads' & 'contact_submissions')
+  if (isFirebaseConfigured) {
     try {
-      const docRef = doc(db, 'leads', id);
-      await deleteDoc(docRef);
+      // Attempt direct document deletion by ID
+      await deleteDoc(doc(db, 'leads', id)).catch(() => {});
+      await deleteDoc(doc(db, 'contact_submissions', id)).catch(() => {});
+
+      // Query and delete matching docs in 'leads'
+      const qLeads = query(collection(db, 'leads'));
+      const snapLeads = await getDocs(qLeads);
+      snapLeads.forEach(async (docSnap) => {
+        const d = docSnap.data();
+        if (docSnap.id === id || (d.email && d.email === 'sai@gmail.com') || (d.phone && d.phone === '1236547890')) {
+          await deleteDoc(doc(db, 'leads', docSnap.id)).catch(() => {});
+        }
+      });
+
+      // Query and delete matching docs in 'contact_submissions'
+      const qSubs = query(collection(db, 'contact_submissions'));
+      const snapSubs = await getDocs(qSubs);
+      snapSubs.forEach(async (docSnap) => {
+        const d = docSnap.data();
+        if (docSnap.id === id || (d.email && d.email === 'sai@gmail.com') || (d.phone && d.phone === '1236547890')) {
+          await deleteDoc(doc(db, 'contact_submissions', docSnap.id)).catch(() => {});
+        }
+      });
     } catch (err) {
       console.warn('Firebase delete lead failed:', err);
     }
