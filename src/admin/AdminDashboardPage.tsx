@@ -197,13 +197,24 @@ export const AdminDashboardPage: React.FC = () => {
   };
 
   // --- QUOTATION HANDLERS ---
+  const [savingQuotation, setSavingQuotation] = useState(false);
+
   const handleSaveQuotation = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingQuotation) return;
     if (!editingQuotation?.clientName || !editingQuotation.projectName) return;
-    await saveQuotationRecord(editingQuotation);
-    setQuotationModalOpen(false);
-    setEditingQuotation(null);
-    loadData();
+    
+    setSavingQuotation(true);
+    try {
+      await saveQuotationRecord(editingQuotation);
+      setQuotationModalOpen(false);
+      setEditingQuotation(null);
+      await loadData();
+    } catch (err) {
+      console.error('Error saving quotation:', err);
+    } finally {
+      setSavingQuotation(false);
+    }
   };
 
   const handleDeleteQuotation = async (id: string) => {

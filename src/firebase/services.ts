@@ -522,9 +522,12 @@ export const getQuotations = async (): Promise<Quotation[]> => {
         });
       });
 
+      // Deduplicate seamlessly by quotationNumber (or id if quotationNumber missing)
       const map = new Map<string, Quotation>();
-      localQuotations.forEach(q => map.set(q.id, q));
-      cloudDocs.forEach(q => map.set(q.id, q));
+      const getKey = (item: Quotation) => item.quotationNumber || item.id;
+
+      localQuotations.forEach(item => map.set(getKey(item), item));
+      cloudDocs.forEach(item => map.set(getKey(item), item));
 
       const merged = Array.from(map.values()).sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -535,7 +538,10 @@ export const getQuotations = async (): Promise<Quotation[]> => {
     }
   }
 
-  return localQuotations;
+  // Deduplicate local storage entries as well
+  const map = new Map<string, Quotation>();
+  localQuotations.forEach(item => map.set(item.quotationNumber || item.id, item));
+  return Array.from(map.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 };
 
 export const saveQuotationRecord = async (quotationData: Partial<Quotation>): Promise<Quotation> => {
@@ -545,12 +551,11 @@ export const saveQuotationRecord = async (quotationData: Partial<Quotation>): Pr
   nextMonthDate.setDate(nextMonthDate.getDate() + 15);
   const validUntilStr = nextMonthDate.toISOString().split('T')[0];
 
-  const allQuotations = await getQuotations();
   const id = quotationData.id || 'quo_' + Date.now();
-  
-  // Generate quotation number if missing
+
   let quoNum = quotationData.quotationNumber;
   if (!quoNum) {
+    const allQuotations = await getQuotations();
     const year = new Date().getFullYear();
     const count = allQuotations.length + 1;
     quoNum = `TNX-QUO-${year}-${String(count).padStart(3, '0')}`;
@@ -588,9 +593,9 @@ export const saveQuotationRecord = async (quotationData: Partial<Quotation>): Pr
     updatedAt: now
   };
 
-  // Local storage update
+  // Local storage update (deduplicate by id or quotationNumber)
   const currentLocal = getLocalQuotations();
-  const existingIdx = currentLocal.findIndex(q => q.id === id);
+  const existingIdx = currentLocal.findIndex(q => q.id === id || q.quotationNumber === quoNum);
   if (existingIdx >= 0) {
     currentLocal[existingIdx] = fullQuotation;
   } else {
@@ -598,16 +603,11 @@ export const saveQuotationRecord = async (quotationData: Partial<Quotation>): Pr
   }
   saveLocalQuotations(currentLocal);
 
-  // Firebase update
+  // Firebase update (use setDoc with exact id so Firestore & LocalStorage use same key)
   if (isFirebaseConfigured) {
     try {
-      if (quotationData.id && !quotationData.id.startsWith('quo_')) {
-        const docRef = doc(db, 'quotations', quotationData.id);
-        await updateDoc(docRef, fullQuotation as any);
-      } else {
-        const docRef = await addDoc(collection(db, 'quotations'), fullQuotation);
-        fullQuotation.id = docRef.id;
-      }
+      const docRef = doc(db, 'quotations', id);
+      await setDoc(docRef, fullQuotation, { merge: true });
     } catch (err) {
       console.warn('Firebase save quotation failed:', err);
     }
@@ -618,13 +618,24 @@ export const saveQuotationRecord = async (quotationData: Partial<Quotation>): Pr
 
 export const deleteQuotationRecord = async (id: string): Promise<boolean> => {
   const currentLocal = getLocalQuotations();
-  const filtered = currentLocal.filter(q => q.id !== id);
+  const target = currentLocal.find(q => q.id === id);
+  const targetQuoNum = target?.quotationNumber;
+
+  const filtered = currentLocal.filter(q => q.id !== id && (targetQuoNum ? q.quotationNumber !== targetQuoNum : true));
   saveLocalQuotations(filtered);
 
-  if (isFirebaseConfigured && !id.startsWith('quo_')) {
+  if (isFirebaseConfigured) {
     try {
-      const docRef = doc(db, 'quotations', id);
-      await deleteDoc(docRef);
+      await deleteDoc(doc(db, 'quotations', id)).catch(() => {});
+      if (targetQuoNum) {
+        const qDocs = query(collection(db, 'quotations'));
+        const snap = await getDocs(qDocs);
+        snap.forEach(async (docSnap) => {
+          if (docSnap.data().quotationNumber === targetQuoNum) {
+            await deleteDoc(doc(db, 'quotations', docSnap.id)).catch(() => {});
+          }
+        });
+      }
     } catch (err) {
       console.warn('Firebase delete quotation failed:', err);
     }
