@@ -485,15 +485,15 @@ export const calculateQuotationTotals = (
 
 export const getQuotations = async (): Promise<Quotation[]> => {
   const localQuotations = getLocalQuotations();
+  let allRawQuotations: Quotation[] = [...localQuotations];
 
   if (isFirebaseConfigured) {
     try {
       const q = query(collection(db, 'quotations'), orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
-      const cloudDocs: Quotation[] = [];
       snapshot.forEach(docSnap => {
         const d = docSnap.data();
-        cloudDocs.push({
+        allRawQuotations.push({
           id: docSnap.id,
           quotationNumber: d.quotationNumber || `TNX-QUO-${docSnap.id.substring(0, 5).toUpperCase()}`,
           date: d.date || new Date().toISOString().split('T')[0],
@@ -521,27 +521,55 @@ export const getQuotations = async (): Promise<Quotation[]> => {
           updatedAt: d.updatedAt || new Date().toISOString()
         });
       });
-
-      // Deduplicate seamlessly by quotationNumber (or id if quotationNumber missing)
-      const map = new Map<string, Quotation>();
-      const getKey = (item: Quotation) => item.quotationNumber || item.id;
-
-      localQuotations.forEach(item => map.set(getKey(item), item));
-      cloudDocs.forEach(item => map.set(getKey(item), item));
-
-      const merged = Array.from(map.values()).sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-      return merged;
     } catch (err) {
       console.warn('Firebase read quotations failed, using local storage:', err);
     }
   }
 
-  // Deduplicate local storage entries as well
+  // Multi-tier signature deduplication
   const map = new Map<string, Quotation>();
-  localQuotations.forEach(item => map.set(item.quotationNumber || item.id, item));
-  return Array.from(map.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const duplicateDocIdsToDelete: string[] = [];
+
+  // Sort by createdAt desc so newest record is kept
+  allRawQuotations.sort((a, b) => new Date(b.createdAt || b.updatedAt).getTime() - new Date(a.createdAt || a.updatedAt).getTime());
+
+  allRawQuotations.forEach(q => {
+    // Generate signature key: quotationNumber OR (clientName + projectName + grandTotal)
+    const quoNumKey = (q.quotationNumber && q.quotationNumber.trim()) ? q.quotationNumber.trim() : '';
+    const contentKey = `${(q.clientName || '').toLowerCase().trim()}_${(q.projectName || '').toLowerCase().trim()}_${q.grandTotal}`;
+    const primaryKey = quoNumKey || contentKey;
+
+    if (map.has(primaryKey) || (quoNumKey && map.has(contentKey))) {
+      // Duplicate entry detected! Mark for purge
+      const existingDoc = map.get(primaryKey) || map.get(contentKey);
+      if (q.id && q.id !== existingDoc?.id) {
+        duplicateDocIdsToDelete.push(q.id);
+      }
+    } else {
+      map.set(primaryKey, q);
+      if (quoNumKey) map.set(contentKey, q);
+    }
+  });
+
+  const uniqueQuotations = Array.from(new Set(map.values())).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  // Clean local storage with unique set
+  saveLocalQuotations(uniqueQuotations);
+
+  // Async purge extra duplicate docs from Firestore
+  if (isFirebaseConfigured && duplicateDocIdsToDelete.length > 0) {
+    duplicateDocIdsToDelete.forEach(async (dupId) => {
+      try {
+        await deleteDoc(doc(db, 'quotations', dupId));
+      } catch (e) {
+        // Ignored
+      }
+    });
+  }
+
+  return uniqueQuotations;
 };
 
 export const saveQuotationRecord = async (quotationData: Partial<Quotation>): Promise<Quotation> => {
